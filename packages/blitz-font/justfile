@@ -1,0 +1,62 @@
+# Blitz Font Testing Commands
+# ONLY APPROVED METHOD FOR RUNNING TESTS: `just test`
+
+# Run all tests with nextest (DEFAULT AND REQUIRED)
+test:
+    cargo nextest run
+
+# Run tests in watch mode for development
+test-watch:
+    cargo nextest run --watch
+
+# Run tests with coverage reporting
+test-coverage:
+    cargo nextest run --profile coverage
+    
+# Run documentation tests
+test-doc:
+    cargo test --doc
+
+# Run specific test by name pattern
+test-pattern PATTERN:
+    cargo nextest run -E "test({{PATTERN}})"
+
+# Run tests for a specific test file
+test-file FILE:
+    cargo nextest run -E "test({{FILE}})"
+
+# Run tests in CI mode with stricter settings  
+test-ci:
+    cargo nextest run --profile ci
+
+# Clean test artifacts
+test-clean:
+    cargo clean
+    rm -rf target/nextest
+
+# Show nextest version and configuration
+test-info:
+    cargo nextest --version
+    cargo nextest list --list-type binaries-only
+
+# Run slow/integration tests only
+test-slow:
+    cargo nextest run -E "test(slow) or test(integration)"
+
+# Run quick unit tests only (default filter excludes slow tests)
+test-quick:
+    cargo nextest run -E "not test(slow) and not test(integration)"
+
+# Show test output for debugging
+test-debug:
+    cargo nextest run --success-output immediate --failure-output immediate
+
+# Benchmark tests using criterion
+benchmark:
+    cargo bench
+
+# Format and lint before testing
+test-prepare:
+    cargo fmt --all
+    cargo clippy --all-targets -- -D warnings
+    just test

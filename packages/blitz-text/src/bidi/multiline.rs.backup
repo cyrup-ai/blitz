@@ -1,0 +1,389 @@
+//! Multi-line BiDi text processing
+//!
+//! This module handles line breaking, paragraph processing, and multi-line
+//! bidirectional text layout with proper line wrapping and paragraph handling.
+
+use unicode_linebreak::{linebreaks, BreakOpportunity};
+
+use super::processing::BidiProcessor;
+use super::types::{
+    BidiError, BidiRenderOptions, Direction, LineBidi, LineBreakInfo, LineMetrics,
+    MultiLineBidiResult, ParagraphBidi, ProcessedBidi,
+};
+use crate::types::ShapedRun;
+
+/// Multi-line BiDi text processor
+pub struct MultiLineBidiProcessor {
+    processor: BidiProcessor,
+    max_width: f32,
+    line_height: f32,
+}
+
+impl MultiLineBidiProcessor {
+    /// Create new multi-line processor
+    pub fn new(default_direction: Direction, max_width: f32, line_height: f32) -> Self {
+        Self {
+            processor: BidiProcessor::new(default_direction),
+            max_width,
+            line_height,
+        }
+    }
+
+    /// Set maximum line width
+    pub fn set_max_width(&mut self, max_width: f32) {
+        self.max_width = max_width;
+    }
+
+    /// Set line height
+    pub fn set_line_height(&mut self, line_height: f32) {
+        self.line_height = line_height;
+    }
+
+    /// Process multi-line bidirectional text
+    pub fn process_multiline_bidi_text(
+        &self,
+        text: &str,
+        options: &BidiRenderOptions,
+    ) -> Result<MultiLineBidiResult, BidiError> {
+        // Split text into paragraphs
+        let paragraphs = self.split_into_paragraphs(text);
+        let mut processed_paragraphs = Vec::new();
+
+        for (paragraph_index, paragraph_text) in paragraphs.iter().enumerate() {
+            let paragraph_bidi =
+                self.process_paragraph(paragraph_text, paragraph_index, options)?;
+            processed_paragraphs.push(paragraph_bidi);
+        }
+
+        let total_lines = processed_paragraphs.iter().map(|p| p.lines.len()).sum();
+
+        Ok(MultiLineBidiResult {
+            paragraphs: processed_paragraphs,
+            total_lines,
+            base_direction: options.base_direction,
+        })
+    }
+
+    /// Process a single paragraph with line breaking
+    fn process_paragraph(
+        &self,
+        text: &str,
+        paragraph_index: usize,
+        options: &BidiRenderOptions,
+    ) -> Result<ParagraphBidi, BidiError> {
+        // First, process the entire paragraph for BiDi
+        let processed_bidi = self.processor.process_bidi_text(text, options)?;
+
+        // Then break into lines based on width constraints
+        let line_breaks = self.calculate_line_breaks(text, &processed_bidi)?;
+        let mut lines = Vec::new();
+
+        for (line_index, line_info) in line_breaks.iter().enumerate() {
+            let line_bidi = self.process_line(&line_info.text, line_index, options, line_info)?;
+            lines.push(line_bidi);
+        }
+
+        Ok(ParagraphBidi {
+            paragraph_index,
+            lines,
+            base_direction: processed_bidi.base_direction,
+        })
+    }
+
+    /// Process a single line of text
+    fn process_line(
+        &self,
+        line_text: &str,
+        line_index: usize,
+        options: &BidiRenderOptions,
+        line_info: &LineBreakInfo,
+    ) -> Result<LineBidi, BidiError> {
+        let processed_bidi = self.processor.process_bidi_text(line_text, options)?;
+
+        // Calculate line metrics
+        let baseline_offset = self.line_height * 0.8; // 80% of line height
+        let visual_width = line_info
+            .line_widths
+            .get(line_index)
+            .copied()
+            .unwrap_or(0.0);
+
+        Ok(LineBidi {
+            line_index,
+            processed_bidi: (*processed_bidi).clone(),
+            line_height: self.line_height,
+            baseline_offset,
+            visual_width,
+            break_opportunity: line_info
+                .break_opportunities
+                .get(line_index)
+                .copied()
+                .unwrap_or(false),
+        })
+    }
+
+    /// Split text into paragraphs
+    fn split_into_paragraphs<'a>(&self, text: &'a str) -> Vec<&'a str> {
+        text.split('\n').collect()
+    }
+
+    /// Calculate line breaks for text
+    fn calculate_line_breaks(
+        &self,
+        text: &str,
+        processed_bidi: &ProcessedBidi,
+    ) -> Result<Vec<LineBreakInfo>, BidiError> {
+        // Find Unicode line break opportunities
+        let break_opportunities: Vec<_> = linebreaks(text).collect();
+        let mut lines = Vec::new();
+        let mut current_line_start = 0;
+
+        for (break_index, break_opportunity) in break_opportunities.iter().enumerate() {
+            let break_position = break_opportunity.0;
+
+            // Check if we should break here based on width constraints
+            if self.should_break_line(text, current_line_start, break_position, processed_bidi)? {
+                let line_text = &text[current_line_start..break_position];
+                let line_width = self.calculate_line_width(line_text, processed_bidi)?;
+
+                lines.push(LineBreakInfo {
+                    text: line_text.to_string(),
+                    break_positions: vec![break_position],
+                    break_opportunities: vec![matches!(
+                        break_opportunity.1,
+                        BreakOpportunity::Allowed
+                    )],
+                    line_widths: vec![line_width],
+                    max_width: self.max_width,
+                });
+
+                current_line_start = break_position;
+            }
+        }
+
+        // Handle remaining text
+        if current_line_start < text.len() {
+            let line_text = &text[current_line_start..];
+            let line_width = self.calculate_line_width(line_text, processed_bidi)?;
+
+            lines.push(LineBreakInfo {
+                text: line_text.to_string(),
+                break_positions: vec![text.len()],
+                break_opportunities: vec![true],
+                line_widths: vec![line_width],
+                max_width: self.max_width,
+            });
+        }
+
+        Ok(lines)
+    }
+
+    /// Check if line should be broken at given position
+    fn should_break_line(
+        &self,
+        text: &str,
+        line_start: usize,
+        break_position: usize,
+        processed_bidi: &ProcessedBidi,
+    ) -> Result<bool, BidiError> {
+        let line_text = &text[line_start..break_position];
+        let line_width = self.calculate_line_width(line_text, processed_bidi)?;
+
+        Ok(line_width > self.max_width)
+    }
+
+    /// Calculate width of a line of text
+    fn calculate_line_width(
+        &self,
+        line_text: &str,
+        processed_bidi: &ProcessedBidi,
+    ) -> Result<f32, BidiError> {
+        // This is a simplified calculation
+        // In practice, would need shaped runs to get accurate width
+        Ok(line_text.chars().count() as f32 * 10.0) // Rough estimate
+    }
+
+    /// Wrap text to fit within specified width
+    pub fn wrap_text(
+        &self,
+        text: &str,
+        options: &BidiRenderOptions,
+        shaped_runs: &[ShapedRun],
+    ) -> Result<Vec<(ProcessedBidi, Vec<ShapedRun>)>, BidiError> {
+        let multiline_result = self.process_multiline_bidi_text(text, options)?;
+        let mut wrapped_lines = Vec::new();
+
+        for paragraph in &multiline_result.paragraphs {
+            for line in &paragraph.lines {
+                // Find shaped runs that correspond to this line
+                let line_shaped_runs =
+                    self.extract_shaped_runs_for_line(&line.processed_bidi, shaped_runs)?;
+
+                wrapped_lines.push((line.processed_bidi.clone(), line_shaped_runs));
+            }
+        }
+
+        Ok(wrapped_lines)
+    }
+
+    /// Extract shaped runs that correspond to a specific line
+    fn extract_shaped_runs_for_line(
+        &self,
+        line_bidi: &ProcessedBidi,
+        all_shaped_runs: &[ShapedRun],
+    ) -> Result<Vec<ShapedRun>, BidiError> {
+        let mut line_runs = Vec::new();
+
+        for shaped_run in all_shaped_runs {
+            // Check if this shaped run overlaps with the line
+            if self.shaped_run_overlaps_line(shaped_run, line_bidi) {
+                // Clone and potentially trim the shaped run to fit the line
+                let trimmed_run = self.trim_shaped_run_to_line(shaped_run, line_bidi)?;
+                line_runs.push(trimmed_run);
+            }
+        }
+
+        Ok(line_runs)
+    }
+
+    /// Check if shaped run overlaps with line
+    fn shaped_run_overlaps_line(&self, shaped_run: &ShapedRun, line_bidi: &ProcessedBidi) -> bool {
+        let run_start = shaped_run.start_index;
+        let run_end = shaped_run.end_index;
+
+        // For simplicity, assume line covers entire text
+        // In practice, would need proper line boundary tracking
+        run_start < line_bidi.text.len() && run_end > 0
+    }
+
+    /// Trim shaped run to fit within line boundaries
+    fn trim_shaped_run_to_line(
+        &self,
+        shaped_run: &ShapedRun,
+        line_bidi: &ProcessedBidi,
+    ) -> Result<ShapedRun, BidiError> {
+        // For simplicity, return a clone
+        // In practice, would trim glyphs and adjust ranges
+        Ok(shaped_run.clone())
+    }
+
+    /// Calculate total height of multi-line text
+    pub fn calculate_total_height(&self, multiline_result: &MultiLineBidiResult) -> f32 {
+        multiline_result.total_lines as f32 * self.line_height
+    }
+
+    /// Get line at specific y coordinate
+    pub fn get_line_at_y(
+        &self,
+        multiline_result: &MultiLineBidiResult,
+        y: f32,
+    ) -> Option<(usize, usize)> {
+        let line_index = (y / self.line_height).floor() as usize;
+        let mut current_line = 0;
+
+        for (paragraph_index, paragraph) in multiline_result.paragraphs.iter().enumerate() {
+            if current_line + paragraph.lines.len() > line_index {
+                let line_in_paragraph = line_index - current_line;
+                return Some((paragraph_index, line_in_paragraph));
+            }
+            current_line += paragraph.lines.len();
+        }
+
+        None
+    }
+
+    /// Get line metrics for a specific line
+    pub fn get_line_metrics(
+        &self,
+        multiline_result: &MultiLineBidiResult,
+        paragraph_index: usize,
+        line_index: usize,
+    ) -> Option<LineMetrics> {
+        let paragraph = multiline_result.paragraphs.get(paragraph_index)?;
+        let line = paragraph.lines.get(line_index)?;
+
+        Some(LineMetrics {
+            line_height: line.line_height,
+            baseline_offset: line.baseline_offset,
+            ascent: line.baseline_offset,
+            descent: line.line_height - line.baseline_offset,
+        })
+    }
+
+    /// Optimize line breaks for better visual appearance
+    pub fn optimize_line_breaks(
+        &self,
+        multiline_result: &mut MultiLineBidiResult,
+    ) -> Result<(), BidiError> {
+        // This would implement algorithms like:
+        // - Knuth-Plass line breaking
+        // - Widow/orphan control
+        // - Hyphenation
+        // For now, it's a placeholder
+
+        for paragraph in &mut multiline_result.paragraphs {
+            for line in &mut paragraph.lines {
+                // Placeholder optimization
+                line.break_opportunity = true;
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Get statistics about multi-line processing
+    pub fn get_multiline_stats(&self, multiline_result: &MultiLineBidiResult) -> MultiLineStats {
+        let total_paragraphs = multiline_result.paragraphs.len();
+        let total_lines = multiline_result.total_lines;
+        let avg_lines_per_paragraph = if total_paragraphs > 0 {
+            total_lines as f32 / total_paragraphs as f32
+        } else {
+            0.0
+        };
+
+        let total_characters: usize = multiline_result
+            .paragraphs
+            .iter()
+            .flat_map(|p| &p.lines)
+            .map(|l| l.processed_bidi.text.chars().count())
+            .sum();
+
+        MultiLineStats {
+            total_paragraphs,
+            total_lines,
+            total_characters,
+            avg_lines_per_paragraph,
+            total_height: self.calculate_total_height(multiline_result),
+        }
+    }
+}
+
+/// Multi-line processing statistics
+#[derive(Debug, Clone)]
+pub struct MultiLineStats {
+    pub total_paragraphs: usize,
+    pub total_lines: usize,
+    pub total_characters: usize,
+    pub avg_lines_per_paragraph: f32,
+    pub total_height: f32,
+}
+
+impl MultiLineStats {
+    /// Get average characters per line
+    pub fn avg_characters_per_line(&self) -> f32 {
+        if self.total_lines > 0 {
+            self.total_characters as f32 / self.total_lines as f32
+        } else {
+            0.0
+        }
+    }
+
+    /// Get text density (characters per unit height)
+    pub fn text_density(&self) -> f32 {
+        if self.total_height > 0.0 {
+            self.total_characters as f32 / self.total_height
+        } else {
+            0.0
+        }
+    }
+}

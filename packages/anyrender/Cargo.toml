@@ -1,0 +1,16 @@
+[package]
+name = "anyrender"
+description = "2D Canvas abstraction"
+version = "0.4.1"
+homepage = "https://github.com/dioxuslabs/blitz"
+repository = "https://github.com/dioxuslabs/blitz"
+documentation = "https://docs.rs/anyrender"
+license = "MIT OR Apache-2.0"
+edition = "2024"
+rust-version = "1.85.0"
+
+[dependencies]
+kurbo = "0.12.0"
+peniko = "0.4.1"
+raw-window-handle = "0.6.2"
+blitz-text = { path = "../blitz-text" }

@@ -1,0 +1,23 @@
+[workspace]
+resolver = "2"
+members = [
+    "packages/anyrender",
+    "packages/anyrender_svg", 
+    "packages/anyrender_vello",
+    "packages/anyrender_vello_cpu",
+    "packages/blitz",
+    "packages/blitz-dom",
+    "packages/blitz-font",
+    "packages/blitz-html",
+    "packages/blitz-net",
+    "packages/blitz-paint",
+    "packages/blitz-shell",
+    "packages/blitz-text",
+    "packages/blitz-traits",
+    "packages/mini-dxn",
+    "packages/stylo_taffy",
+]
+
+[workspace.package]
+edition = "2024"
+repository = "https://github.com/cyrup-ai/blitz"

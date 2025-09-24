@@ -1,0 +1,32 @@
+[package]
+name = "anyrender_svg"
+description = "Render SVGs with anyrender"
+version = "0.4.1"
+homepage = "https://github.com/dioxuslabs/blitz"
+repository = "https://github.com/dioxuslabs/blitz"
+documentation = "https://docs.rs/anyrender-svg"
+license = "MIT OR Apache-2.0"
+edition = "2024"
+rust-version = "1.85.0"
+
+[dependencies]
+peniko = "0.4.1"
+kurbo = "0.12.0"
+usvg = "0.45.1"
+thiserror = "2.0.16"
+
+[features]
+default = [ "image_format_png", "image_format_gif", "image_format_jpeg", "image_format_webp",]
+image = [ "dep:image",]
+image_format_png = [ "image", "image/png",]
+image_format_jpeg = [ "image", "image/jpeg",]
+image_format_gif = [ "image", "image/gif",]
+image_format_webp = [ "image", "image/webp",]
+
+[dependencies.anyrender]
+path = "../anyrender"
+
+[dependencies.image]
+version = "0.25.8"
+default-features = false
+optional = true

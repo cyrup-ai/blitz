@@ -1,0 +1,1607 @@
+//! Enable the dom to participate in styling by servo
+use std::ptr::NonNull;
+use std::sync::atomic::Ordering;
+
+use atomic_refcell::{AtomicRef, AtomicRefMut};
+use markup5ever::{LocalName, LocalNameStaticSet, Namespace, NamespaceStaticSet, local_name};
+use selectors::{
+    Element, OpaqueElement,
+    attr::{AttrSelectorOperation, AttrSelectorOperator, NamespaceConstraint},
+    matching::{ElementSelectorFlags, MatchingContext, VisitedHandlingMode},
+    sink::Push,
+};
+use style::CaseSensitivityExt;
+use style::applicable_declarations::ApplicableDeclarationBlock;
+use style::color::AbsoluteColor;
+use style::properties::{Importance, PropertyDeclaration};
+use style::rule_tree::CascadeLevel;
+use style::selector_parser::PseudoElement;
+use style::servo::url::ComputedUrl;
+use style::stylesheets::layer_rule::LayerOrder;
+use style::stylesheets::scope_rule::ImplicitScopeRoot;
+use style::values::AtomString;
+use style::values::computed::Percentage;
+use style::values::computed::text::TextAlign as StyloTextAlign;
+use style::values::generics::image::Image as StyloImage;
+use style::values::specified::box_::DisplayOutside;
+use style::{
+    Atom,
+    animation::DocumentAnimationSet,
+    context::{
+        QuirksMode, RegisteredSpeculativePainter, RegisteredSpeculativePainters,
+        SharedStyleContext, StyleContext,
+    },
+    dom::{LayoutIterator, NodeInfo, OpaqueNode, TDocument, TElement, TNode, TShadowRoot},
+    global_style_data::GLOBAL_STYLE_DATA,
+    properties::PropertyDeclarationBlock,
+    properties::generated::longhands::position::computed_value::T as Position,
+    selector_parser::{NonTSPseudoClass, SelectorImpl},
+    servo_arc::{Arc, ArcBorrow},
+    shared_lock::{Locked, SharedRwLock, StylesheetGuards},
+    thread_state::ThreadState,
+    traversal::{DomTraversal, PerLevelTraversalData},
+    traversal_flags::TraversalFlags,
+    values::{AtomIdent, GenericAtomIdent},
+};
+use style_dom::ElementState;
+use stylo_taffy::{GridAxis, GridContext, MasonryPlacementState};
+use web_atoms;
+
+use crate::net::ImageHandler;
+use crate::node::BackgroundImageData;
+use crate::node::Node;
+use crate::node::NodeData;
+use crate::util::ImageType;
+
+impl crate::document::BaseDocument {
+    /// Walk the whole tree, converting styles to layout
+    pub fn flush_styles_to_layout(&mut self, node_id: usize) {
+        self.flush_styles_to_layout_with_grid_context(node_id, None);
+    }
+
+    /// Walk the whole tree, converting styles to layout with grid context support
+    fn flush_styles_to_layout_with_grid_context(
+        &mut self,
+        node_id: usize,
+        grid_context: Option<GridContext>,
+    ) {
+        let doc_id = self.id();
+
+        let display = {
+            let node = match self.nodes.get_mut(node_id) {
+                Some(node) => node,
+                None => {
+                    eprintln!(
+                        "Warning: flush_styles_to_layout called with invalid node_id {}",
+                        node_id
+                    );
+                    return;
+                }
+            };
+            let stylo_element_data = node.stylo_element_data.borrow();
+            let primary_styles = stylo_element_data
+                .as_ref()
+                .and_then(|data| data.styles.get_primary());
+
+            let Some(style) = primary_styles else {
+                return;
+            };
+
+            let device = self.stylist.device();
+            // Use interior mutability to safely update style while stylo_element_data is borrowed
+            let new_style = if let Some(ref grid_ctx) = grid_context {
+                stylo_taffy::to_taffy_style_with_grid_context(
+                    style,
+                    &device,
+                    Some(grid_ctx),
+                    Some(grid_ctx),
+                )
+            } else {
+                stylo_taffy::to_taffy_style_with_device(style, &device)
+            };
+            
+            // Store display value before moving the style
+            let display = new_style.display;
+            
+            // Update the style using interior mutability
+            // SAFETY: This unsafe operation is justified by the following invariants:
+            //
+            // ## Safety Invariants:
+            // 1. **Exclusive Write Access**: We have exclusive access to this node during style computation
+            //    - No other thread can be reading or writing the style field simultaneously
+            //    - The style computation is inherently sequential within each traversal
+            //
+            // 2. **Valid Memory Layout**: The pointer returned by style_interior_mut() points to:
+            //    - A properly initialized Style value (initialized in Node::new)
+            //    - Memory that remains valid for the node's entire lifetime
+            //    - Properly aligned memory for the Style type
+            //
+            // 3. **No Aliasing Violation**: 
+            //    - No immutable references to this style exist during this write
+            //    - The write completes before any subsequent reads
+            //    - Generation tracking ensures cache consistency
+            //
+            // ## Preconditions:
+            // - Node must remain alive for the duration of this operation
+            // - No concurrent access to this specific node's style field
+            // - new_style must be a valid, fully-initialized Style value
+            //
+            // ## Postconditions:
+            // - Style field contains the new_style value
+            // - Style generation will be incremented to invalidate dependent caches
+            // - Memory layout remains consistent and valid
+            //
+            // ## Integration with Generation Tracking:
+            // This write is immediately followed by atomic generation updates that ensure
+            // any cached computations based on the old style are properly invalidated.
+            unsafe {
+                *node.style_interior_mut() = new_style;
+            }
+            
+            // Increment style generation to invalidate any cached computations
+            // This signals that the taffy style has been updated and dependent caches should be invalidated
+            node.style_generation.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            // Update the cached generation to mark this style as valid
+            node.cached_style_generation.store(
+                node.style_generation.load(std::sync::atomic::Ordering::Relaxed),
+                std::sync::atomic::Ordering::Relaxed
+            );
+
+            node.display_outer = match style.clone_display().outside() {
+                DisplayOutside::None => crate::node::DisplayOuter::None,
+                DisplayOutside::Inline => crate::node::DisplayOuter::Inline,
+                DisplayOutside::Block => crate::node::DisplayOuter::Block,
+                DisplayOutside::TableCaption => crate::node::DisplayOuter::Block,
+                DisplayOutside::InternalTable => crate::node::DisplayOuter::Block,
+            };
+
+            // Flush background image from style to dedicated storage on the node
+            // TODO: handle multiple background images
+            if let Some(elem) = node.data.downcast_element_mut() {
+                let style_bgs = &style.get_background().background_image.0;
+                let elem_bgs = &mut elem.background_images;
+
+                let len = style_bgs.len();
+                elem_bgs.resize_with(len, || None);
+
+                for idx in 0..len {
+                    let background_image = &style_bgs[idx];
+                    let new_bg_image = match background_image {
+                        StyloImage::Url(ComputedUrl::Valid(new_url)) => {
+                            let old_bg_image = elem_bgs[idx].as_ref();
+                            let old_bg_image_url = old_bg_image.and_then(|data| data.url());
+                            if old_bg_image_url.is_some_and(|old_url| **new_url == **old_url) {
+                                break;
+                            }
+
+                            self.net_provider.fetch(
+                                doc_id,
+                                Request::get((**new_url).clone()),
+                                Box::new(ImageHandler::new(node_id, ImageType::Background(idx))),
+                            );
+
+                            let bg_image_data = BackgroundImageData::new(new_url.clone());
+                            Some(bg_image_data)
+                        }
+                        StyloImage::Gradient(gradient) => {
+                            // Handle CSS gradients - no network fetch needed
+                            let bg_image_data = BackgroundImageData::new_gradient(*gradient.clone());
+                            Some(bg_image_data)
+                        }
+                        _ => None,
+                    };
+
+                    // Element will always exist due to resize_with above
+                    elem_bgs[idx] = new_bg_image;
+                }
+            }
+
+            // Clear Taffy cache
+            // TODO: smarter cache invalidation
+            node.cache.clear();
+
+            display
+        };
+
+        // Invalidate taffy style cache for smart caching with memory-optimized feature
+        let _ = self.invalidate_taffy_style_cache(node_id);
+
+        // If the node has children, then take those children and...
+        let children = self.nodes[node_id].layout_children.borrow_mut().take();
+        if let Some(mut children) = children {
+            // Create grid context for children if this is a grid container
+            let child_grid_context = if matches!(display, taffy::Display::Grid) {
+                self.create_grid_context_for_children(node_id)
+            } else {
+                None
+            };
+
+            // Recursively call flush_styles_to_layout on each child
+            for child in children.iter() {
+                self.flush_styles_to_layout_with_grid_context(*child, child_grid_context.clone());
+            }
+
+            // If the node is a Flexbox or Grid node then sort by css order property
+            if matches!(display, taffy::Display::Flex | taffy::Display::Grid) {
+                children.sort_by(|left, right| {
+                    let left_node = match self.nodes.get(*left) {
+                        Some(node) => node,
+                        None => {
+                            eprintln!(
+                                "Warning: Invalid left node_id {} during CSS order sort",
+                                left
+                            );
+                            return std::cmp::Ordering::Equal;
+                        }
+                    };
+                    let right_node = match self.nodes.get(*right) {
+                        Some(node) => node,
+                        None => {
+                            eprintln!(
+                                "Warning: Invalid right node_id {} during CSS order sort",
+                                right
+                            );
+                            return std::cmp::Ordering::Equal;
+                        }
+                    };
+                    left_node.order().cmp(&right_node.order())
+                });
+            }
+
+            // Put children back
+            *self.nodes[node_id].layout_children.borrow_mut() = Some(children);
+
+            // Sort paint_children in place
+            if let Some(ref mut paint_children) =
+                self.nodes[node_id].paint_children.borrow_mut().as_mut()
+            {
+                paint_children.sort_by(|left, right| {
+                    let left_node = match self.nodes.get(*left) {
+                        Some(node) => node,
+                        None => {
+                            eprintln!("Warning: Invalid left node_id {} during z-index sort", left);
+                            return std::cmp::Ordering::Equal;
+                        }
+                    };
+                    let right_node = match self.nodes.get(*right) {
+                        Some(node) => node,
+                        None => {
+                            eprintln!(
+                                "Warning: Invalid right node_id {} during z-index sort",
+                                right
+                            );
+                            return std::cmp::Ordering::Equal;
+                        }
+                    };
+                    left_node
+                        .z_index()
+                        .cmp(&right_node.z_index())
+                        .then_with(|| {
+                            fn position_to_order(pos: Position) -> u8 {
+                                match pos {
+                                    Position::Static | Position::Relative | Position::Sticky => 0,
+                                    Position::Absolute | Position::Fixed => 1,
+                                }
+                            }
+                            let left_position = left_node
+                                .primary_styles()
+                                .map(|s| position_to_order(s.clone_position()))
+                                .unwrap_or(0);
+                            let right_position = right_node
+                                .primary_styles()
+                                .map(|s| position_to_order(s.clone_position()))
+                                .unwrap_or(0);
+
+                            left_position.cmp(&right_position)
+                        })
+                });
+            }
+        }
+        
+        // Verify smart cache functionality by testing get_or_compute_taffy_style
+        let _cached_style = self.get_or_compute_taffy_style(taffy::NodeId::from(node_id));
+    }
+
+    /// Check if grid container supports subgrid per CSS Grid Level 2 specification
+    ///
+    /// Subgrid is supported when:
+    /// 1. Element has a parent grid container
+    /// 2. Element does not have layout containment
+    /// 3. Element is not absolutely positioned
+    ///
+    /// # Returns
+    /// - `true` if subgrid is supported
+    /// - `false` if subgrid should fallback to `none`
+    fn check_subgrid_support(
+        &self,
+        parent_node_id: usize,
+        primary_styles: &style::properties::ComputedValues,
+    ) -> bool {
+        use style::values::specified::box_::DisplayInside;
+
+        // Rule 1: Check if element has parent grid container
+        let has_parent_grid = if parent_node_id == 0 {
+            false // Root element has no parent
+        } else {
+            // Check if parent is a grid container
+            if let Some(parent_node) = self.nodes.get(parent_node_id.saturating_sub(1)) {
+                if let Some(parent_data) = parent_node.stylo_element_data.borrow().as_ref() {
+                    if let Some(parent_styles) = parent_data.styles.get_primary() {
+                        let parent_display = parent_styles.clone_display();
+                        parent_display.inside() == DisplayInside::Grid
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                }
+            } else {
+                false
+            }
+        };
+
+        if !has_parent_grid {
+            return false; // CSS Grid L2: No parent grid -> no subgrid support
+        }
+
+        // Rule 2: Check for absolute positioning (creates independent formatting context)
+        let position = primary_styles.clone_position();
+        let is_absolutely_positioned = matches!(position, Position::Absolute | Position::Fixed);
+
+        if is_absolutely_positioned {
+            return false; // CSS Grid L2: Absolute positioning -> no subgrid support
+        }
+
+        // Rule 3: Check for layout containment (creates independent formatting context)
+        // Note: This would need the actual containment property access
+        // For now, assume no containment since it's less common
+        // Check for layout containment property
+        let contain = primary_styles.clone_contain();
+        let has_layout_containment = contain.contains(style::values::specified::Contain::LAYOUT);
+
+        if has_layout_containment {
+            return false; // CSS Grid L2: Layout containment -> no subgrid support
+        }
+
+        // All conditions passed - subgrid is supported
+        true
+    }
+
+    /// Extract line names from stylo grid template component
+    ///
+    /// Uses existing stylo_taffy conversion infrastructure to extract line names
+    /// from GridTemplateComponent TrackList structures.
+    fn extract_line_names_from_stylo(
+        &self,
+        grid_template: &style::values::computed::GridTemplateComponent,
+    ) -> Vec<Vec<String>> {
+        // Use existing conversion function for line name extraction
+        match stylo_taffy::convert::grid_template_line_names(grid_template) {
+            Some(line_names) => line_names,
+            None => Vec::new(), // No line names or not a TrackList
+        }
+    }
+
+    /// Calculate available space for masonry track count determination
+    ///
+    /// Estimates available space in the grid axis (opposite of masonry axis)
+    /// for optimal track count calculation.
+    fn get_available_space_for_masonry(
+        &self,
+        primary_styles: &style::properties::ComputedValues,
+        masonry_axis: taffy::AbsoluteAxis,
+    ) -> Option<f32> {
+        // Get the grid axis (opposite of masonry axis)
+        let grid_axis = match masonry_axis {
+            taffy::AbsoluteAxis::Vertical => taffy::AbsoluteAxis::Horizontal,
+            taffy::AbsoluteAxis::Horizontal => taffy::AbsoluteAxis::Vertical,
+        };
+
+        // Get the size in the grid axis for track count calculation
+        let position_styles = primary_styles.get_position();
+        let size = match grid_axis {
+            taffy::AbsoluteAxis::Horizontal => &position_styles.width,
+            taffy::AbsoluteAxis::Vertical => &position_styles.height,
+        };
+
+        // Extract definite size if available
+        match size {
+            style::values::generics::length::GenericSize::LengthPercentage(length_percentage) => {
+                // Try to extract definite length
+                match length_percentage.0.to_length() {
+                    Some(length) => Some(length.px()),
+                    None => None, // Percentage or indefinite size
+                }
+            }
+            _ => None, // Auto or other indefinite size
+        }
+    }
+
+    /// Create masonry state if needed based on grid template analysis
+    ///
+    /// Checks if either axis is masonry and creates appropriate MasonryPlacementState
+    /// with calculated track count based on available space.
+    fn create_masonry_state_if_needed(
+        &self,
+        primary_styles: &style::properties::ComputedValues,
+    ) -> Option<MasonryPlacementState> {
+        let position_styles = primary_styles.get_position();
+
+        // Check if rows are masonry axis
+        if stylo_taffy::convert::is_masonry_axis(&position_styles.grid_template_rows) {
+            let available_space =
+                self.get_available_space_for_masonry(primary_styles, taffy::AbsoluteAxis::Vertical);
+
+            let track_count = if let Some(space) = available_space {
+                // Calculate optimal masonry tracks based on available space
+                // Use a simple heuristic: one track per 200px of available space, minimum 2, maximum 8
+                ((space / 200.0).round() as usize).max(2).min(8)
+            } else {
+                3 // Default track count for indefinite space
+            };
+
+            return Some(MasonryPlacementState::new(track_count));
+        }
+
+        // Check if columns are masonry axis
+        if stylo_taffy::convert::is_masonry_axis(&position_styles.grid_template_columns) {
+            let available_space = self
+                .get_available_space_for_masonry(primary_styles, taffy::AbsoluteAxis::Horizontal);
+
+            let track_count = if let Some(space) = available_space {
+                // Calculate optimal masonry tracks based on available space
+                // Use a simple heuristic: one track per 200px of available space, minimum 2, maximum 8
+                ((space / 200.0).round() as usize).max(2).min(8)
+            } else {
+                3 // Default track count for indefinite space  
+            };
+
+            return Some(MasonryPlacementState::new(track_count));
+        }
+
+        None // Not a masonry grid
+    }
+
+    /// Create grid context for children of a grid container
+    /// This enables subgrid inheritance and masonry layout algorithms
+    pub(crate) fn create_grid_context_for_children(&self, parent_node_id: usize) -> Option<GridContext> {
+        use style::values::specified::box_::DisplayInside;
+
+        let parent_node = self.nodes.get(parent_node_id)?;
+        let stylo_element_data = parent_node.stylo_element_data.borrow();
+        let primary_styles = stylo_element_data
+            .as_ref()
+            .and_then(|data| data.styles.get_primary())?;
+
+        // Only create grid context for actual grid containers
+        let display = primary_styles.clone_display();
+        if display.inside() != DisplayInside::Grid {
+            return None;
+        }
+
+        // Extract parent grid track information for subgrid inheritance
+        let parent_tracks = stylo_taffy::convert::grid_template_tracks(
+            &primary_styles.get_position().grid_template_columns,
+            None, // No recursive context needed for parent
+        );
+
+        // IMPLEMENTATION 1: Extract real line names from stylo
+        // Replace TODO comment with actual line name extraction
+        let parent_line_names = {
+            let mut all_line_names = Vec::new();
+
+            // Extract line names from columns
+            let column_line_names = self.extract_line_names_from_stylo(
+                &primary_styles.get_position().grid_template_columns,
+            );
+            all_line_names.extend(column_line_names);
+
+            // Extract line names from rows
+            let row_line_names = self
+                .extract_line_names_from_stylo(&primary_styles.get_position().grid_template_rows);
+            all_line_names.extend(row_line_names);
+
+            all_line_names
+        };
+
+        // IMPLEMENTATION 2: Real subgrid support detection per CSS Grid Level 2
+        // Replace hardcoded value with actual validation logic
+        let supports_subgrid = self.check_subgrid_support(parent_node_id, primary_styles);
+
+        // IMPLEMENTATION 3: Real masonry state creation with calculated track count
+        // Replace hardcoded track count with space-based calculation
+        let masonry_state = self.create_masonry_state_if_needed(primary_styles);
+
+        Some(GridContext {
+            parent_tracks,
+            parent_line_names,
+            axis: GridAxis::Row, // Default to row axis
+            supports_subgrid,
+            available_space: None, // Will be filled during layout
+            masonry_state,
+        })
+    }
+
+    pub fn resolve_stylist(&mut self) {
+        style::thread_state::enter(ThreadState::LAYOUT);
+
+        let guard = &self.guard;
+        let guards = StylesheetGuards {
+            author: &guard.read(),
+            ua_or_user: &guard.read(),
+        };
+
+        let root = match TDocument::as_node(&&self.nodes[0]).first_element_child() {
+            Some(root) => root,
+            None => {
+                eprintln!("Warning: Document has no root element child for styling");
+                return;
+            }
+        };
+
+        let root_element = match root.as_element() {
+            Some(element) => element,
+            None => {
+                eprintln!("Warning: Root node is not an element, cannot perform styling");
+                return;
+            }
+        };
+
+        self.stylist
+            .flush(&guards, Some(root_element), Some(&self.snapshots));
+
+        // Build the style context used by the style traversal
+        let context = SharedStyleContext {
+            traversal_flags: TraversalFlags::empty(),
+            stylist: &self.stylist,
+            options: GLOBAL_STYLE_DATA.options.clone(),
+            guards,
+            visited_styles_enabled: false,
+            animations: DocumentAnimationSet::default().clone(),
+            current_time_for_animations: 0.0,
+            snapshot_map: &self.snapshots,
+            registered_speculative_painters: &RegisteredPaintersImpl,
+        };
+
+        // components/layout_2020/lib.rs:983
+        let root = self.root_element();
+        // dbg!(root);
+        let token = RecalcStyle::pre_traverse(root, &context);
+
+        if token.should_traverse() {
+            // Style the elements, resolving their data
+            let traverser = RecalcStyle::new(context);
+            style::driver::traverse_dom(&traverser, token, None);
+        }
+
+        style::thread_state::exit(ThreadState::LAYOUT);
+    }
+}
+
+/// A handle to a node that Servo's style traits are implemented against
+///
+/// Since BlitzNodes are not persistent (IE we don't keep the pointers around between frames), we choose to just implement
+/// the tree structure in the nodes themselves, and temporarily give out pointers during the layout phase.
+type BlitzNode<'a> = &'a Node;
+
+impl<'a> TDocument for BlitzNode<'a> {
+    type ConcreteNode = BlitzNode<'a>;
+
+    fn as_node(&self) -> Self::ConcreteNode {
+        self
+    }
+
+    fn is_html_document(&self) -> bool {
+        true
+    }
+
+    fn quirks_mode(&self) -> QuirksMode {
+        QuirksMode::NoQuirks
+    }
+
+    fn shared_lock(&self) -> &SharedRwLock {
+        &self.guard
+    }
+}
+
+impl NodeInfo for BlitzNode<'_> {
+    fn is_element(&self) -> bool {
+        Node::is_element(self)
+    }
+
+    fn is_text_node(&self) -> bool {
+        Node::is_text_node(self)
+    }
+}
+
+impl<'a> TShadowRoot for BlitzNode<'a> {
+    type ConcreteNode = BlitzNode<'a>;
+
+    fn as_node(&self) -> Self::ConcreteNode {
+        self
+    }
+
+    fn host(&self) -> <Self::ConcreteNode as TNode>::ConcreteElement {
+        todo!("Shadow roots not implemented")
+    }
+
+    fn style_data<'b>(&self) -> Option<&'b style::stylist::CascadeData>
+    where
+        Self: 'b,
+    {
+        todo!("Shadow roots not implemented")
+    }
+}
+
+// components/styleaapper.rs:
+impl<'a> TNode for BlitzNode<'a> {
+    type ConcreteElement = BlitzNode<'a>;
+    type ConcreteDocument = BlitzNode<'a>;
+    type ConcreteShadowRoot = BlitzNode<'a>;
+
+    fn parent_node(&self) -> Option<Self> {
+        self.parent.map(|id| self.with(id))
+    }
+
+    fn first_child(&self) -> Option<Self> {
+        self.children.first().map(|id| self.with(*id))
+    }
+
+    fn last_child(&self) -> Option<Self> {
+        self.children.last().map(|id| self.with(*id))
+    }
+
+    fn prev_sibling(&self) -> Option<Self> {
+        self.backward(1)
+    }
+
+    fn next_sibling(&self) -> Option<Self> {
+        self.forward(1)
+    }
+
+    fn owner_doc(&self) -> Self::ConcreteDocument {
+        self.with(1)
+    }
+
+    fn is_in_document(&self) -> bool {
+        true
+    }
+
+    // I think this is the same as parent_node only in the cases when the direct parent is not a real element, forcing us
+    // to travel upwards
+    //
+    // For the sake of this demo, we're just going to return the parent node ann
+    fn traversal_parent(&self) -> Option<Self::ConcreteElement> {
+        self.parent_node().and_then(|node| node.as_element())
+    }
+
+    fn opaque(&self) -> OpaqueNode {
+        OpaqueNode(self.id)
+    }
+
+    fn debug_id(self) -> usize {
+        self.id
+    }
+
+    fn as_element(&self) -> Option<Self::ConcreteElement> {
+        match self.data {
+            NodeData::Element { .. } => Some(self),
+            _ => None,
+        }
+    }
+
+    fn as_document(&self) -> Option<Self::ConcreteDocument> {
+        match self.data {
+            NodeData::Document => Some(self),
+            _ => None,
+        }
+    }
+
+    fn as_shadow_root(&self) -> Option<Self::ConcreteShadowRoot> {
+        // TODO: implement shadow DOM
+        None
+    }
+}
+
+impl selectors::Element for BlitzNode<'_> {
+    type Impl = SelectorImpl;
+
+    fn opaque(&self) -> selectors::OpaqueElement {
+        // FIXME: this is wrong in the case where pushing new elements casuses reallocations.
+        // We should see if selectors will accept a PR that allows creation from a usize
+        let ptr = (self.id + 1) as *mut ();
+        let non_null = match NonNull::new(ptr) {
+            Some(non_null) => non_null,
+            None => {
+                // This should never happen since we add 1 to ensure non-zero pointer
+                // But provide a safe fallback just in case
+                NonNull::dangling()
+            }
+        };
+        OpaqueElement::from_non_null_ptr(non_null)
+    }
+
+    fn parent_element(&self) -> Option<Self> {
+        TElement::traversal_parent(self)
+    }
+
+    fn parent_node_is_shadow_root(&self) -> bool {
+        false
+    }
+
+    fn containing_shadow_host(&self) -> Option<Self> {
+        None
+    }
+
+    fn is_pseudo_element(&self) -> bool {
+        matches!(self.data, NodeData::AnonymousBlock(_))
+    }
+
+    // These methods are implemented naively since we only threaded real nodes and not fake nodes
+    // we should try and use `find` instead of this foward/backward stuff since its ugly and slow
+    fn prev_sibling_element(&self) -> Option<Self> {
+        let mut n = 1;
+        while let Some(node) = self.backward(n) {
+            if node.is_element() {
+                return Some(node);
+            }
+            n += 1;
+        }
+
+        None
+    }
+
+    fn next_sibling_element(&self) -> Option<Self> {
+        let mut n = 1;
+        while let Some(node) = self.forward(n) {
+            if node.is_element() {
+                return Some(node);
+            }
+            n += 1;
+        }
+
+        None
+    }
+
+    fn first_element_child(&self) -> Option<Self> {
+        let mut children = self.dom_children();
+        children.find(|child| child.is_element())
+    }
+
+    fn is_html_element_in_html_document(&self) -> bool {
+        true // self.has_namespace(ns!(html))
+    }
+
+    fn has_local_name(&self, local_name: &LocalName) -> bool {
+        self.data.is_element_with_tag_name(local_name)
+    }
+
+    fn has_namespace(&self, ns: &Namespace) -> bool {
+        match self.element_data() {
+            Some(element_data) => element_data.name.ns == *ns,
+            None => {
+                eprintln!("Warning: has_namespace called on non-element node");
+                false
+            }
+        }
+    }
+
+    fn is_same_type(&self, other: &Self) -> bool {
+        self.local_name() == other.local_name() && self.namespace() == other.namespace()
+    }
+
+    fn attr_matches(
+        &self,
+        _ns: &NamespaceConstraint<&GenericAtomIdent<NamespaceStaticSet>>,
+        local_name: &GenericAtomIdent<LocalNameStaticSet>,
+        operation: &AttrSelectorOperation<&AtomString>,
+    ) -> bool {
+        let Some(attr_value) = self.data.attr(local_name.0.clone()) else {
+            return false;
+        };
+
+        match operation {
+            AttrSelectorOperation::Exists => true,
+            AttrSelectorOperation::WithValue {
+                operator,
+                case_sensitivity: _,
+                value,
+            } => {
+                let value = value.as_ref();
+
+                // TODO: case sensitivity
+                match operator {
+                    AttrSelectorOperator::Equal => attr_value == value,
+                    AttrSelectorOperator::Includes => attr_value
+                        .split_ascii_whitespace()
+                        .any(|word| word == value),
+                    AttrSelectorOperator::DashMatch => {
+                        // Represents elements with an attribute name of attr whose value can be exactly value
+                        // or can begin with value immediately followed by a hyphen, - (U+002D)
+                        attr_value.starts_with(value)
+                            && (attr_value.len() == value.len()
+                                || attr_value.chars().nth(value.len()) == Some('-'))
+                    }
+                    AttrSelectorOperator::Prefix => attr_value.starts_with(value),
+                    AttrSelectorOperator::Substring => attr_value.contains(value),
+                    AttrSelectorOperator::Suffix => attr_value.ends_with(value),
+                }
+            }
+        }
+    }
+
+    fn match_non_ts_pseudo_class(
+        &self,
+        pseudo_class: &<Self::Impl as selectors::SelectorImpl>::NonTSPseudoClass,
+        _context: &mut MatchingContext<Self::Impl>,
+    ) -> bool {
+        match *pseudo_class {
+            NonTSPseudoClass::Active => self.element_state.contains(ElementState::ACTIVE),
+            NonTSPseudoClass::AnyLink => self
+                .data
+                .downcast_element()
+                .map(|elem| {
+                    (elem.name.local == local_name!("a") || elem.name.local == local_name!("area"))
+                        && elem.attr(local_name!("href")).is_some()
+                })
+                .unwrap_or(false),
+            NonTSPseudoClass::Checked => self
+                .data
+                .downcast_element()
+                .and_then(|elem| elem.checkbox_input_checked())
+                .unwrap_or(false),
+            NonTSPseudoClass::Valid => false,
+            NonTSPseudoClass::Invalid => false,
+            NonTSPseudoClass::Defined => false,
+            NonTSPseudoClass::Disabled => false,
+            NonTSPseudoClass::Enabled => false,
+            NonTSPseudoClass::Focus => self.element_state.contains(ElementState::FOCUS),
+            NonTSPseudoClass::FocusWithin => false,
+            NonTSPseudoClass::FocusVisible => false,
+            NonTSPseudoClass::Fullscreen => false,
+            NonTSPseudoClass::Hover => self.element_state.contains(ElementState::HOVER),
+            NonTSPseudoClass::Indeterminate => false,
+            NonTSPseudoClass::Lang(_) => false,
+            NonTSPseudoClass::CustomState(_) => false,
+            NonTSPseudoClass::Link => self
+                .data
+                .downcast_element()
+                .map(|elem| {
+                    (elem.name.local == local_name!("a") || elem.name.local == local_name!("area"))
+                        && elem.attr(local_name!("href")).is_some()
+                })
+                .unwrap_or(false),
+            NonTSPseudoClass::PlaceholderShown => false,
+            NonTSPseudoClass::ReadWrite => false,
+            NonTSPseudoClass::ReadOnly => false,
+            NonTSPseudoClass::ServoNonZeroBorder => false,
+            NonTSPseudoClass::Target => false,
+            NonTSPseudoClass::Visited => false,
+            NonTSPseudoClass::Autofill => false,
+            NonTSPseudoClass::Default => false,
+
+            NonTSPseudoClass::InRange => false,
+            NonTSPseudoClass::Modal => false,
+            NonTSPseudoClass::Optional => false,
+            NonTSPseudoClass::OutOfRange => false,
+            NonTSPseudoClass::PopoverOpen => false,
+            NonTSPseudoClass::Required => false,
+            NonTSPseudoClass::UserInvalid => false,
+            NonTSPseudoClass::UserValid => false,
+            NonTSPseudoClass::MozMeterOptimum => false,
+            NonTSPseudoClass::MozMeterSubOptimum => false,
+            NonTSPseudoClass::MozMeterSubSubOptimum => false,
+        }
+    }
+
+    fn match_pseudo_element(
+        &self,
+        pe: &PseudoElement,
+        _context: &mut MatchingContext<Self::Impl>,
+    ) -> bool {
+        match self.data {
+            NodeData::AnonymousBlock(_) => *pe == PseudoElement::ServoAnonymousBox,
+            _ => false,
+        }
+    }
+
+    fn apply_selector_flags(&self, flags: ElementSelectorFlags) {
+        // Handle flags that apply to the element.
+        let self_flags = flags.for_self();
+        if !self_flags.is_empty() {
+            *self.selector_flags.borrow_mut() |= self_flags;
+        }
+
+        // Handle flags that apply to the parent.
+        let parent_flags = flags.for_parent();
+        if !parent_flags.is_empty() {
+            if let Some(parent) = self.parent_node() {
+                *parent.selector_flags.borrow_mut() |= parent_flags;
+            }
+        }
+    }
+
+    fn is_link(&self) -> bool {
+        self.data.is_element_with_tag_name(&local_name!("a"))
+    }
+
+    fn is_html_slot_element(&self) -> bool {
+        false
+    }
+
+    fn has_id(
+        &self,
+        id: &<Self::Impl as selectors::SelectorImpl>::Identifier,
+        case_sensitivity: selectors::attr::CaseSensitivity,
+    ) -> bool {
+        self.element_data()
+            .and_then(|data| data.id.as_ref())
+            .map(|id_attr| case_sensitivity.eq_atom(id_attr, id))
+            .unwrap_or(false)
+    }
+
+    fn has_class(
+        &self,
+        search_name: &<Self::Impl as selectors::SelectorImpl>::Identifier,
+        case_sensitivity: selectors::attr::CaseSensitivity,
+    ) -> bool {
+        let class_attr = self.data.attr(local_name!("class"));
+        if let Some(class_attr) = class_attr {
+            // split the class attribute
+            for pheme in class_attr.split_ascii_whitespace() {
+                let atom = Atom::from(pheme);
+                if case_sensitivity.eq_atom(&atom, search_name) {
+                    return true;
+                }
+            }
+        }
+
+        false
+    }
+
+    fn imported_part(
+        &self,
+        _name: &<Self::Impl as selectors::SelectorImpl>::Identifier,
+    ) -> Option<<Self::Impl as selectors::SelectorImpl>::Identifier> {
+        None
+    }
+
+    fn is_part(&self, _name: &<Self::Impl as selectors::SelectorImpl>::Identifier) -> bool {
+        false
+    }
+
+    fn is_empty(&self) -> bool {
+        self.dom_children().next().is_none()
+    }
+
+    fn is_root(&self) -> bool {
+        self.parent_node()
+            .and_then(|parent| parent.parent_node())
+            .is_none()
+    }
+
+    fn has_custom_state(
+        &self,
+        _name: &<Self::Impl as selectors::SelectorImpl>::Identifier,
+    ) -> bool {
+        false
+    }
+
+    fn add_element_unique_hashes(&self, _filter: &mut selectors::bloom::BloomFilter) -> bool {
+        false
+    }
+}
+
+impl<'a> TElement for BlitzNode<'a> {
+    type ConcreteNode = BlitzNode<'a>;
+
+    type TraversalChildrenIterator = Traverser<'a>;
+
+    fn as_node(&self) -> Self::ConcreteNode {
+        self
+    }
+
+    fn implicit_scope_for_sheet_in_shadow_root(
+        _opaque_host: OpaqueElement,
+        _sheet_index: usize,
+    ) -> Option<ImplicitScopeRoot> {
+        // We cannot currently implement this as we are using the NodeId as the OpaqueElement,
+        // and need a reference to the Slab to convert it back into an Element
+        //
+        // Luckily it is only needed for shadow dom.
+        todo!();
+    }
+
+    fn traversal_children(&self) -> style::dom::LayoutIterator<Self::TraversalChildrenIterator> {
+        LayoutIterator(Traverser {
+            // dom: self.tree(),
+            parent: self,
+            child_index: 0,
+        })
+    }
+
+    fn is_html_element(&self) -> bool {
+        self.is_element()
+    }
+
+    // not implemented.....
+    fn is_mathml_element(&self) -> bool {
+        false
+    }
+
+    // need to check the namespace
+    fn is_svg_element(&self) -> bool {
+        false
+    }
+
+    fn style_attribute(&self) -> Option<ArcBorrow<'_, Locked<PropertyDeclarationBlock>>> {
+        match self.element_data() {
+            Some(element_data) => element_data
+                .style_attribute
+                .as_ref()
+                .map(|f| f.borrow_arc()),
+            None => {
+                eprintln!("Warning: style_attribute called on non-element node");
+                None
+            }
+        }
+    }
+
+    fn animation_rule(
+        &self,
+        _: &SharedStyleContext,
+    ) -> Option<Arc<Locked<PropertyDeclarationBlock>>> {
+        None
+    }
+
+    fn transition_rule(
+        &self,
+        _context: &SharedStyleContext,
+    ) -> Option<Arc<Locked<PropertyDeclarationBlock>>> {
+        None
+    }
+
+    fn state(&self) -> ElementState {
+        self.element_state
+    }
+
+    fn has_part_attr(&self) -> bool {
+        false
+    }
+
+    fn exports_any_part(&self) -> bool {
+        false
+    }
+
+    fn id(&self) -> Option<&style::Atom> {
+        self.element_data().and_then(|data| data.id.as_ref())
+    }
+
+    fn each_class<F>(&self, mut callback: F)
+    where
+        F: FnMut(&style::values::AtomIdent),
+    {
+        let class_attr = self.data.attr(local_name!("class"));
+        if let Some(class_attr) = class_attr {
+            // split the class attribute
+            for pheme in class_attr.split_ascii_whitespace() {
+                let atom = Atom::from(pheme); // interns the string
+                callback(AtomIdent::cast(&atom));
+            }
+        }
+    }
+
+    fn each_attr_name<F>(&self, mut callback: F)
+    where
+        F: FnMut(&style::LocalName),
+    {
+        if let Some(attrs) = self.data.attrs() {
+            for attr in attrs.iter() {
+                callback(&GenericAtomIdent(attr.name.local.clone()));
+            }
+        }
+    }
+
+    fn has_dirty_descendants(&self) -> bool {
+        true
+    }
+
+    fn has_snapshot(&self) -> bool {
+        self.has_snapshot
+    }
+
+    fn handled_snapshot(&self) -> bool {
+        self.snapshot_handled.load(Ordering::SeqCst)
+    }
+
+    unsafe fn set_handled_snapshot(&self) {
+        self.snapshot_handled.store(true, Ordering::SeqCst);
+    }
+
+    unsafe fn set_dirty_descendants(&self) {}
+
+    unsafe fn unset_dirty_descendants(&self) {}
+
+    fn store_children_to_process(&self, _n: isize) {
+        // Store the number of children to process for parallel styling
+        // Simple non-parallel implementation - no-op for single-threaded scenarios
+    }
+
+    fn did_process_child(&self) -> isize {
+        // Return and decrement the count of processed children
+        // Simple non-parallel implementation
+        0
+    }
+
+    unsafe fn ensure_data(&self) -> AtomicRefMut<'_, style::data::ElementData> {
+        let mut stylo_data = self.stylo_element_data.borrow_mut();
+        if stylo_data.is_none() {
+            *stylo_data = Some(Default::default());
+        }
+        AtomicRefMut::map(stylo_data, |sd| {
+            sd.as_mut().unwrap_or_else(|| {
+                // This should never happen since we just ensured the data exists above
+                panic!("BUG: ensure_data failed to initialize ElementData - this indicates a serious threading or borrowing issue");
+            })
+        })
+    }
+
+    unsafe fn clear_data(&self) {
+        *self.stylo_element_data.borrow_mut() = None;
+    }
+
+    fn has_data(&self) -> bool {
+        self.stylo_element_data.borrow().is_some()
+    }
+
+    fn borrow_data(&self) -> Option<AtomicRef<'_, style::data::ElementData>> {
+        let stylo_data = self.stylo_element_data.borrow();
+        if stylo_data.is_some() {
+            Some(AtomicRef::map(stylo_data, |sd| {
+                sd.as_ref().unwrap_or_else(|| {
+                    // This should never happen since we just checked is_some() above
+                    panic!("BUG: borrow_data found Some data but as_ref() returned None - this indicates a serious threading or borrowing issue");
+                })
+            }))
+        } else {
+            None
+        }
+    }
+
+    fn mutate_data(&self) -> Option<AtomicRefMut<'_, style::data::ElementData>> {
+        let stylo_data = self.stylo_element_data.borrow_mut();
+        if stylo_data.is_some() {
+            Some(AtomicRefMut::map(stylo_data, |sd| {
+                sd.as_mut().unwrap_or_else(|| {
+                    // This should never happen since we just checked is_some() above
+                    panic!("BUG: mutate_data found Some data but as_mut() returned None - this indicates a serious threading or borrowing issue");
+                })
+            }))
+        } else {
+            None
+        }
+    }
+
+    fn skip_item_display_fixup(&self) -> bool {
+        false
+    }
+
+    fn may_have_animations(&self) -> bool {
+        false
+    }
+
+    fn has_animations(&self, _context: &SharedStyleContext) -> bool {
+        false
+    }
+
+    fn has_css_animations(
+        &self,
+        _context: &SharedStyleContext,
+        _pseudo_element: Option<style::selector_parser::PseudoElement>,
+    ) -> bool {
+        false
+    }
+
+    fn has_css_transitions(
+        &self,
+        _context: &SharedStyleContext,
+        _pseudo_element: Option<style::selector_parser::PseudoElement>,
+    ) -> bool {
+        false
+    }
+
+    fn shadow_root(&self) -> Option<<Self::ConcreteNode as TNode>::ConcreteShadowRoot> {
+        None
+    }
+
+    fn containing_shadow(&self) -> Option<<Self::ConcreteNode as TNode>::ConcreteShadowRoot> {
+        None
+    }
+
+    fn lang_attr(&self) -> Option<style::selector_parser::AttrValue> {
+        None
+    }
+
+    fn match_element_lang(
+        &self,
+        _override_lang: Option<Option<style::selector_parser::AttrValue>>,
+        _value: &style::selector_parser::Lang,
+    ) -> bool {
+        false
+    }
+
+    fn is_html_document_body_element(&self) -> bool {
+        // Check node is a <body> element
+        let is_body_element = self.data.is_element_with_tag_name(&local_name!("body"));
+
+        // If it isn't then return early
+        if !is_body_element {
+            return false;
+        }
+
+        // If it is then check if it is a child of the root (<html>) element
+        let root_node = &self.tree()[0];
+        let root_element = match TDocument::as_node(&root_node).first_element_child() {
+            Some(element) => element,
+            None => {
+                // No root element, so this can't be a body element child of it
+                return false;
+            }
+        };
+        root_element.children.contains(&self.id)
+    }
+
+    fn synthesize_presentational_hints_for_legacy_attributes<V>(
+        &self,
+        _visited_handling: VisitedHandlingMode,
+        hints: &mut V,
+    ) where
+        V: Push<style::applicable_declarations::ApplicableDeclarationBlock>,
+    {
+        let Some(elem) = self.data.downcast_element() else {
+            return;
+        };
+
+        let tag = &elem.name.local;
+
+        let mut push_style = |decl: PropertyDeclaration| {
+            hints.push(ApplicableDeclarationBlock::from_declarations(
+                Arc::new(
+                    self.guard
+                        .wrap(PropertyDeclarationBlock::with_one(decl, Importance::Normal)),
+                ),
+                CascadeLevel::PresHints,
+                LayerOrder::root(),
+            ));
+        };
+
+        fn parse_color_attr(value: &str) -> Option<(u8, u8, u8, f32)> {
+            if !value.starts_with('#') {
+                return None;
+            }
+
+            let value = &value[1..];
+            if value.len() == 3 {
+                let r = u8::from_str_radix(&value[0..1], 16).ok()?;
+                let g = u8::from_str_radix(&value[1..2], 16).ok()?;
+                let b = u8::from_str_radix(&value[2..3], 16).ok()?;
+                return Some((r, g, b, 1.0));
+            }
+
+            if value.len() == 6 {
+                let r = u8::from_str_radix(&value[0..2], 16).ok()?;
+                let g = u8::from_str_radix(&value[2..4], 16).ok()?;
+                let b = u8::from_str_radix(&value[4..6], 16).ok()?;
+                return Some((r, g, b, 1.0));
+            }
+
+            None
+        }
+
+        fn parse_size_attr(
+            value: &str,
+            filter_fn: impl FnOnce(&f32) -> bool,
+        ) -> Option<style::values::specified::LengthPercentage> {
+            use style::values::specified::{AbsoluteLength, LengthPercentage, NoCalcLength};
+            if let Some(value) = value.strip_suffix("px") {
+                let val: f32 = value.parse().ok()?;
+                return Some(LengthPercentage::Length(NoCalcLength::Absolute(
+                    AbsoluteLength::Px(val),
+                )));
+            }
+
+            if let Some(value) = value.strip_suffix("%") {
+                let val: f32 = value.parse().ok()?;
+                return Some(LengthPercentage::Percentage(Percentage(val / 100.0)));
+            }
+
+            let val: f32 = value.parse().ok().filter(filter_fn)?;
+            Some(LengthPercentage::Length(NoCalcLength::Absolute(
+                AbsoluteLength::Px(val),
+            )))
+        }
+
+        for attr in elem.attrs() {
+            let name = &attr.name.local;
+            let value = attr.value.as_str();
+
+            if *name == local_name!("align") {
+                use style::values::specified::TextAlign;
+                let keyword = match value {
+                    "left" => Some(StyloTextAlign::MozLeft),
+                    "right" => Some(StyloTextAlign::MozRight),
+                    "center" => Some(StyloTextAlign::MozCenter),
+                    _ => None,
+                };
+
+                if let Some(keyword) = keyword {
+                    push_style(PropertyDeclaration::TextAlign(TextAlign::Keyword(keyword)));
+                }
+            }
+
+            // https://html.spec.whatwg.org/multipage/rendering.html#dimRendering
+            if *name == local_name!("width")
+                && (*tag == local_name!("table")
+                    || *tag == local_name!("col")
+                    || *tag == local_name!("tr")
+                    || *tag == local_name!("td")
+                    || *tag == local_name!("th")
+                    || *tag == local_name!("hr"))
+            {
+                let is_table = *tag == local_name!("table");
+                if let Some(width) = parse_size_attr(value, |v| !is_table || *v != 0.0) {
+                    use style::values::generics::{NonNegative, length::Size};
+
+                    push_style(PropertyDeclaration::Width(Size::LengthPercentage(
+                        NonNegative(width),
+                    )));
+                }
+            }
+
+            if *name == local_name!("height")
+                && (*tag == local_name!("table")
+                    || *tag == local_name!("thead")
+                    || *tag == local_name!("tbody")
+                    || *tag == local_name!("tfoot"))
+            {
+                if let Some(height) = parse_size_attr(value, |_| true) {
+                    use style::values::generics::{NonNegative, length::Size};
+                    push_style(PropertyDeclaration::Height(Size::LengthPercentage(
+                        NonNegative(height),
+                    )));
+                }
+            }
+
+            if *name == local_name!("bgcolor") {
+                use style::values::specified::Color;
+                if let Some((r, g, b, a)) = parse_color_attr(value) {
+                    push_style(PropertyDeclaration::BackgroundColor(
+                        Color::from_absolute_color(AbsoluteColor::srgb_legacy(r, g, b, a)),
+                    ));
+                }
+            }
+
+            if *name == local_name!("hidden") {
+                use style::values::specified::Display;
+                push_style(PropertyDeclaration::Display(Display::None));
+            }
+        }
+    }
+
+    fn local_name(&self) -> &LocalName {
+        match self.element_data() {
+            Some(element_data) => &element_data.name.local,
+            None => {
+                eprintln!("Warning: local_name called on non-element node");
+                // Return a static default LocalName for non-element nodes
+                static DEFAULT_LOCAL_NAME: LocalName = local_name!("");
+                &DEFAULT_LOCAL_NAME
+            }
+        }
+    }
+
+    fn namespace(&self) -> &Namespace {
+        match self.element_data() {
+            Some(element_data) => &element_data.name.ns,
+            None => {
+                eprintln!("Warning: namespace called on non-element node");
+                // Return a default namespace for non-element nodes - use a simple empty namespace
+                use std::sync::OnceLock;
+                static DEFAULT_NAMESPACE: OnceLock<Namespace> = OnceLock::new();
+                DEFAULT_NAMESPACE.get_or_init(|| Namespace::from(web_atoms::ns!()))
+            }
+        }
+    }
+
+    fn query_container_size(
+        &self,
+        _display: &style::values::specified::Display,
+    ) -> euclid::default::Size2D<Option<app_units::Au>> {
+        // FIXME: Implement container queries. For now this effectively disables them without panicking.
+        Default::default()
+    }
+
+    fn each_custom_state<F>(&self, _callback: F)
+    where
+        F: FnMut(&AtomIdent),
+    {
+        todo!()
+    }
+
+    fn has_selector_flags(&self, flags: ElementSelectorFlags) -> bool {
+        self.selector_flags.borrow().contains(flags)
+    }
+
+    fn relative_selector_search_direction(&self) -> ElementSelectorFlags {
+        let flags = self.selector_flags.borrow();
+        if flags.contains(ElementSelectorFlags::RELATIVE_SELECTOR_SEARCH_DIRECTION_ANCESTOR_SIBLING)
+        {
+            ElementSelectorFlags::RELATIVE_SELECTOR_SEARCH_DIRECTION_ANCESTOR_SIBLING
+        } else if flags.contains(ElementSelectorFlags::RELATIVE_SELECTOR_SEARCH_DIRECTION_ANCESTOR)
+        {
+            ElementSelectorFlags::RELATIVE_SELECTOR_SEARCH_DIRECTION_ANCESTOR
+        } else if flags.contains(ElementSelectorFlags::RELATIVE_SELECTOR_SEARCH_DIRECTION_SIBLING) {
+            ElementSelectorFlags::RELATIVE_SELECTOR_SEARCH_DIRECTION_SIBLING
+        } else {
+            ElementSelectorFlags::empty()
+        }
+    }
+
+    fn before_pseudo_element(&self) -> Option<Self> {
+        self.before.map(|id| self.with(id))
+    }
+
+    fn after_pseudo_element(&self) -> Option<Self> {
+        self.after.map(|id| self.with(id))
+    }
+
+    fn marker_pseudo_element(&self) -> Option<Self> {
+        None
+    }
+
+    // fn update_animations(
+    //     &self,
+    //     before_change_style: Option<Arc<ComputedValues>>,
+    //     tasks: style::context::UpdateAnimationsTasks,
+    // ) {
+    //     todo!()
+    // }
+
+    // fn process_post_animation(&self, tasks: style::context::PostAnimationTasks) {
+    //     todo!()
+    // }
+
+    // fn needs_transitions_update(
+    //     &self,
+    //     before_change_style: &ComputedValues,
+    //     after_change_style: &ComputedValues,
+    // ) -> bool {
+    //     todo!()
+    // }
+}
+
+pub struct Traverser<'a> {
+    // dom: &'a Slab<Node>,
+    parent: BlitzNode<'a>,
+    child_index: usize,
+}
+
+impl<'a> Iterator for Traverser<'a> {
+    type Item = BlitzNode<'a>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let node_id = self.parent.children.get(self.child_index)?;
+        let node = self.parent.with(*node_id);
+
+        self.child_index += 1;
+
+        Some(node)
+    }
+}
+
+impl std::hash::Hash for BlitzNode<'_> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        state.write_usize(self.id)
+    }
+}
+
+/// Handle custom painters like images for layouting
+///
+/// todo: actually implement this
+pub struct RegisteredPaintersImpl;
+impl RegisteredSpeculativePainters for RegisteredPaintersImpl {
+    fn get(&self, _name: &Atom) -> Option<&dyn RegisteredSpeculativePainter> {
+        None
+    }
+}
+
+use blitz_traits::net::Request;
+use style::traversal::recalc_style_at;
+
+pub struct RecalcStyle<'a> {
+    context: SharedStyleContext<'a>,
+}
+
+impl<'a> RecalcStyle<'a> {
+    pub fn new(context: SharedStyleContext<'a>) -> Self {
+        RecalcStyle { context }
+    }
+}
+
+#[allow(unsafe_code)]
+impl<'a, E> DomTraversal<E> for RecalcStyle<'a>
+where
+    E: TElement,
+{
+    fn process_preorder<F: FnMut(E::ConcreteNode)>(
+        &self,
+        traversal_data: &PerLevelTraversalData,
+        context: &mut StyleContext<E>,
+        node: E::ConcreteNode,
+        note_child: F,
+    ) {
+        // Don't process textnodees in this traversal
+        if node.is_text_node() {
+            return;
+        }
+
+        let el = match node.as_element() {
+            Some(element) => element,
+            None => {
+                eprintln!(
+                    "Warning: Non-text node could not be converted to element during style recalculation"
+                );
+                return;
+            }
+        };
+        // let mut data = el.mutate_data().unwrap();
+        let mut data = unsafe { el.ensure_data() };
+        recalc_style_at(self, traversal_data, context, el, &mut data, note_child);
+
+        // Gets set later on
+        unsafe { el.unset_dirty_descendants() }
+    }
+
+    #[inline]
+    fn needs_postorder_traversal() -> bool {
+        false
+    }
+
+    fn process_postorder(&self, _style_context: &mut StyleContext<E>, _node: E::ConcreteNode) {
+        panic!("this should never be called")
+    }
+
+    #[inline]
+    #[allow(warnings)]
+    fn shared_context(&self) -> &SharedStyleContext {
+        &self.context
+    }
+}
+
+#[test]
+fn assert_size_of_equals() {
+    // use std::mem;
+
+    // fn assert_layout<E>() {
+    //     assert_eq!(
+    //         mem::size_of::<SharingCache<E>>(),
+    //         mem::size_of::<TypelessSharingCache>()
+    //     );
+    //     assert_eq!(
+    //         mem::align_of::<SharingCache<E>>(),
+    //         mem::align_of::<TypelessSharingCache>()
+    //     );
+    // }
+
+    // let size = mem::size_of::<StyleSharingCandidate<BlitzNode>>();
+    // dbg!(size);
+}
+
+#[test]
+fn parse_inline() {
+    // let attrs = style::attr::AttrValue::from_serialized_tokenlist(
+    //     r#"visibility: hidden; left: 1306.5px; top: 50px; display: none;"#.to_string(),
+    // );
+
+    // let val = CSSInlineStyleDeclaration();
+}

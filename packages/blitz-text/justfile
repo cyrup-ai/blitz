@@ -1,0 +1,41 @@
+# Blitz Text Development Justfile
+# CYRUP High-Performance Cache Implementation
+
+# Test runner configuration - REQUIRED for all test execution
+test-runner := "cargo nextest run"
+
+# Default recipe
+default:
+    @echo "Available commands:"
+    @echo "  just test     - Run all tests with nextest (ONLY APPROVED TEST COMMAND)"
+    @echo "  just check    - Fast compilation check"
+    @echo "  just clippy   - Run clippy lints"
+    @echo "  just fmt      - Format code"
+    @echo "  just clean    - Clean build artifacts"
+
+# ONLY APPROVED TEST COMMAND - Run all tests with nextest
+test:
+    {{test-runner}} --all-features
+
+# Fast compilation check
+check:
+    cargo check --all-features --all-targets
+
+# Run clippy lints
+clippy:
+    cargo clippy --all-features --all-targets -- -D warnings
+
+# Format code with rustfmt
+fmt:
+    cargo fmt --all
+
+# Clean build artifacts
+clean:
+    cargo clean
+
+# Install nextest if not present
+install-nextest:
+    cargo install cargo-nextest --locked
+
+# Development workflow - check + test
+dev: check test

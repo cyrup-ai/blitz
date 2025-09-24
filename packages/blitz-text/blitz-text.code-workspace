@@ -1,0 +1,20 @@
+{
+	"folders": [
+		{
+			"path": "."
+		},
+		{
+			"path": "../blitz-cache"
+		},
+		{
+			"path": "../blitz-dom"
+		},
+		{
+			"path": "../blitz-font"
+		},
+		{
+			"path": "../blitz-paint"
+		}
+	],
+	"settings": {}
+}

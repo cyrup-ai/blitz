@@ -1,0 +1,112 @@
+[package]
+name = "blitz-paint"
+description = "Paint a Blitz Document using anyrender"
+documentation = "https://docs.rs/blitz-paint"
+version = "0.1.0-alpha.5"
+license = "MIT OR Apache-2.0"
+homepage = "https://github.com/dioxuslabs/blitz"
+repository = "https://github.com/dioxuslabs/blitz"
+categories = [ "web-programming", "gui",]
+edition = "2024"
+rust-version = "1.85.0"
+
+[features]
+default = [ "png",]
+tracing = [ "dep:tracing",]
+svg = [ "dep:anyrender_svg", "dep:usvg", "blitz-dom/svg",]
+png = [ "dep:png",]
+jpeg = [ "dep:mozjpeg-sys", "dep:libc",]
+webp = [ "dep:libwebp-sys",]
+gecko = []
+
+[dependencies]
+euclid = "0.22.11"
+taffy = "0.9.1"
+
+color = "0.3.2"
+palette = "0.7.6"
+peniko = "0.4.1"
+kurbo = "0.12.0"
+# Glyphon text rendering dependencies
+glyphon = { git = "https://github.com/cyrup-ai/glyphon", branch = "main" }
+flume = "0.11.1"
+fastrand = "2.3.0"
+tokio-util = "0.7.16"
+unicode-segmentation = "1.12.0"
+
+[dev-dependencies]
+tempfile = "3.23.0"
+tokio-test = "0.4.4"
+tracing-subscriber = "0.3.20"
+mockall = "0.13.1"
+
+[dependencies.anyrender]
+path = "../anyrender"
+
+[dependencies.anyrender_svg]
+path = "../anyrender_svg"
+optional = true
+
+[dependencies.blitz-traits]
+path = "../blitz-traits"
+
+[dependencies.blitz-dom]
+path = "../blitz-dom"
+
+[dependencies.blitz-text]
+path = "../blitz-text"
+
+[dependencies.style]
+package = "stylo"
+git = "https://github.com/cyrup-ai/stylo"
+branch = "main"
+default-features = false
+features = [ "servo",]
+
+[dependencies.style_traits]
+package = "stylo_traits"
+git = "https://github.com/cyrup-ai/stylo"
+branch = "main"
+
+[dependencies.usvg]
+version = "0.45.1"
+optional = true
+
+[dependencies.tracing]
+version = "0.1.41"
+optional = true
+
+[dependencies.wgpu]
+git = "https://github.com/cyrup-ai/wgpu"
+branch = "main"
+
+[dependencies.tokio]
+version = "1.47.1"
+features = [ "rt", "fs",]
+
+[dependencies.png]
+version = "0.18.0"
+optional = true
+
+[dependencies.mozjpeg-sys]
+version = "2.2.3"
+optional = true
+
+[dependencies.libwebp-sys]
+version = "0.13.3"
+optional = true
+
+[dependencies.libc]
+version = "1.0.0-alpha.1"
+optional = true
+
+
+
+[dev-dependencies.criterion]
+version = "0.7.0"
+features = [ "html_reports",]
+
+[dev-dependencies.image]
+version = "0.25.8"
+default-features = false
+features = [ "png", "jpeg",]

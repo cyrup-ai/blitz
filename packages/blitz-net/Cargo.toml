@@ -1,0 +1,23 @@
+[package]
+name = "blitz-net"
+description = "Blitz networking"
+documentation = "https://docs.rs/blitz-net"
+version = "0.1.0-alpha.5"
+license = "MIT OR Apache-2.0"
+homepage = "https://github.com/dioxuslabs/blitz"
+repository = "https://github.com/dioxuslabs/blitz"
+categories = ["web-programming", "gui"]
+edition = "2024"
+rust-version = "1.85.0"
+
+[features]
+cookies = ["reqwest/cookies"]
+
+[dependencies]
+# Blitz dependencies
+blitz-traits = { path = "../blitz-traits" }
+
+# Networking dependencies
+tokio = "1.47.1"
+reqwest = { git = "https://github.com/cyrup-ai/reqwest", branch = "main" }
+data-url = "0.3.2"

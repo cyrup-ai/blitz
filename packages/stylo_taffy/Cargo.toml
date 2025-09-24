@@ -1,0 +1,25 @@
+[package]
+name = "stylo_taffy"
+license = "MIT OR Apache-2.0 OR MPL-2.0"
+description = "Interop crate for the stylo and taffy crates"
+keywords = ["css", "layout"]
+version = "0.1.0-alpha.5"
+homepage = "https://github.com/dioxuslabs/blitz"
+repository = "https://github.com/dioxuslabs/blitz"
+categories = ["web-programming", "gui"]
+edition = "2024"
+rust-version = "1.85.0"
+
+
+[dependencies]
+taffy = "0.9.1"
+style = { package = "stylo", git = "https://github.com/cyrup-ai/stylo", branch = "main", default-features = false, features = ["servo"] }
+thiserror = "2.0"
+tracing = "0.1"
+
+[features]
+default = ["std", "block", "flexbox", "grid"]
+std = ["taffy/std"]
+block = ["taffy/block_layout"]
+flexbox = ["taffy/flexbox"]
+grid = ["taffy/grid"]

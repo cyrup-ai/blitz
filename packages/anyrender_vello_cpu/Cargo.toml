@@ -1,0 +1,51 @@
+[package]
+name = "anyrender_vello_cpu"
+description = "vello_cpu backend for anyrender"
+version = "0.4.1"
+homepage = "https://github.com/dioxuslabs/blitz"
+repository = "https://github.com/dioxuslabs/blitz"
+documentation = "https://docs.rs/anyrender_vello_cpu"
+license = "MIT OR Apache-2.0"
+edition = "2024"
+rust-version = "1.85.0"
+
+[features]
+default = [ "external", "std",]
+vendored = [ "dep:bytemuck", "dep:smallvec", "peniko/bytemuck",]
+external = [ "dep:vello_cpu",]
+png = [ "dep:png",]
+simd = []
+std = []
+
+[dependencies]
+kurbo = "0.12.0"
+peniko = "0.4.1"
+softbuffer = "0.4.6"
+
+[dependencies.anyrender]
+path = "../anyrender"
+
+[dependencies.blitz-text]
+path = "../blitz-text"
+
+[dependencies.vello_cpu]
+version = "0.0.1"
+optional = true
+
+[dependencies.bytemuck]
+version = "1.23.2"
+features = []
+optional = true
+
+[dependencies.smallvec]
+version = "2.0.0-alpha.11"
+optional = true
+
+[dependencies.png]
+version = "0.18.0"
+optional = true
+
+
+
+[package.metadata.docs.rs]
+features = [ "external",]

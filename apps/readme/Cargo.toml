@@ -1,0 +1,70 @@
+[package]
+name = "readme"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85.0"
+license = "MIT OR Apache-2.0"
+
+[features]
+default = [ "gpu", "comrak",]
+gpu = [ "dep:anyrender_vello",]
+cpu = [ "dep:anyrender_vello_cpu",]
+avif = [ "dep:image", "image?/avif-native",]
+comrak = [ "dep:comrak",]
+pulldown_cmark = [ "dep:pulldown-cmark",]
+
+[dependencies]
+reqwest = { path = "../../forks/reqwest" }
+url = "2.5.4"
+winit = "0.30.12"
+notify = "8.1.0"
+
+[dependencies.blitz-traits]
+path = "../../packages/blitz-traits"
+
+[dependencies.blitz-dom]
+path = "../../packages/blitz-dom"
+features = [ "default",]
+
+[dependencies.blitz-html]
+path = "../../packages/blitz-html"
+
+[dependencies.blitz-paint]
+path = "../../packages/blitz-paint"
+features = [ "default",]
+
+[dependencies.blitz-net]
+path = "../../packages/blitz-net"
+features = [ "cookies",]
+
+[dependencies.blitz-shell]
+path = "../../packages/blitz-shell"
+features = [ "tracing", "default",]
+
+[dependencies.anyrender_vello]
+path = "../../packages/anyrender_vello"
+optional = true
+
+[dependencies.anyrender_vello_cpu]
+path = "../../packages/anyrender_vello_cpu"
+optional = true
+
+[dependencies.tokio]
+version = "1.52.0"
+features = [ "rt", "rt-multi-thread",]
+
+[dependencies.comrak]
+version = "0.40.0"
+default-features = false
+optional = true
+
+[dependencies.pulldown-cmark]
+version = "0.13.0"
+default-features = false
+features = [ "html",]
+optional = true
+
+[dependencies.image]
+version = "0.25.6"
+default-features = false
+optional = true

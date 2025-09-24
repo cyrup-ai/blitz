@@ -1,0 +1,17 @@
+[package]
+name = "blitz-html"
+description = "Blitz HTML parser"
+documentation = "https://docs.rs/blitz-html"
+version = "0.1.0-alpha.5"
+license = "MIT OR Apache-2.0"
+homepage = "https://github.com/dioxuslabs/blitz"
+repository = "https://github.com/dioxuslabs/blitz"
+categories = ["web-programming", "gui"]
+edition = "2024"
+rust-version = "1.85.0"
+
+[dependencies]
+# Blitz dependencies
+blitz-dom = { path = "../blitz-dom" }
+blitz-traits = { path = "../blitz-traits" }
+html5ever = { git = "https://github.com/cyrup-ai/html5ever", branch = "main" }

@@ -1,0 +1,12 @@
+[package]
+name = "bump"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.85.0"
+description = "Utility to aid publishing blitz"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[dependencies]
+toml_edit = "0.23.2"
+semver = "1.0.26"

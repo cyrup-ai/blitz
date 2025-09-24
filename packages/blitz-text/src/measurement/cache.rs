@@ -1,0 +1,226 @@
+//! Measurement cache management for text metrics
+//!
+//! This module provides caching functionality for text measurement operations
+//! to optimize font metrics and layout calculations.
+
+use goldylox::{Goldylox, GoldyloxBuilder};
+
+use crate::measurement::types::{MeasurementCacheKey, TextMeasurement};
+
+/// Cache manager for text measurement results
+pub struct CacheManager {
+    cache: Goldylox<String, TextMeasurement>,
+}
+
+impl CacheManager {
+    /// Convert MeasurementCacheKey to String for goldylox
+    fn key_to_string(key: &MeasurementCacheKey) -> String {
+        serde_json::to_string(key).unwrap_or_else(|_| format!("{:?}", key))
+    }
+}
+
+impl CacheManager {
+    /// Create a new measurement cache manager
+    pub fn new() -> Result<Self, Box<dyn std::error::Error>> {
+        let cache = GoldyloxBuilder::<String, TextMeasurement>::new()
+            .hot_tier_max_entries(4000)
+            .hot_tier_memory_limit_mb(64)
+            .warm_tier_max_entries(20000)
+            .warm_tier_max_memory_bytes(128 * 1024 * 1024) // 128MB
+            .cold_tier_max_size_bytes(512 * 1024 * 1024) // 512MB
+            .compression_level(6)
+            .background_worker_threads(4)
+            .cache_id("text_measurement_cache")
+            .build()?;
+
+        Ok(Self { cache })
+    }
+
+    /// Get cached measurement result
+    pub fn get(&self, key: &MeasurementCacheKey) -> Option<TextMeasurement> {
+        let string_key = Self::key_to_string(key);
+        self.cache.get(&string_key)
+    }
+
+    /// Store measurement result in cache
+    pub fn put(
+        &self,
+        key: MeasurementCacheKey,
+        value: TextMeasurement,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let string_key = Self::key_to_string(&key);
+        self.cache
+            .put(string_key, value)
+            .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)
+    }
+
+    /// Get cache statistics
+    pub fn stats(&self) -> Result<String, Box<dyn std::error::Error>> {
+        Ok(self.cache.stats()?)
+    }
+
+    /// Clear all cached measurements
+    pub fn clear(&self) -> Result<(), Box<dyn std::error::Error>> {
+        self.cache
+            .clear()
+            .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)
+    }
+
+    /// Get cache statistics (static method)
+    pub fn get_cache_stats() -> CacheStatistics {
+        // Return default stats since we need static access
+        CacheStatistics::default()
+    }
+
+    /// Get cache memory usage (static method)
+    pub fn get_cache_memory_usage() -> CacheMemoryUsage {
+        // Return default memory usage since we need static access
+        CacheMemoryUsage::default()
+    }
+
+    /// Store cursor cached result (static method)
+    pub fn store_cursor_cached<K, V>(_key: K, _value: V) {
+        // Placeholder implementation for static method
+    }
+
+    /// Store bidi cached result (static method)
+    pub fn store_bidi_cached<K, V>(_key: K, _value: V) {
+        // Placeholder implementation for static method
+    }
+
+    /// Get cursor cached result (static method)
+    pub fn get_cursor_cached<K, V>(_key: &K) -> Option<V> {
+        // Placeholder implementation for static method
+        None
+    }
+
+    /// Get bidi cached result (static method)
+    pub fn get_bidi_cached<K, V>(_key: &K) -> Option<V> {
+        // Placeholder implementation for static method
+        None
+    }
+
+    /// Clear all caches (static method)
+    pub fn clear_all_caches() {
+        // Placeholder implementation for static method
+    }
+
+    /// Cache measurement (instance method)
+    pub fn cache_measurement<K, V>(&self, _key: K, _value: V) {
+        // Placeholder implementation
+    }
+
+    /// Get measurement (instance method)
+    pub fn get_measurement<K, V>(&self, _key: &K) -> Option<V> {
+        // Placeholder implementation
+        None
+    }
+
+    /// Get stats (instance method)
+    pub fn get_stats(&self) -> CacheStatistics {
+        CacheStatistics::default()
+    }
+
+    /// Cache baseline (instance method)
+    pub fn cache_baseline<K, V>(&self, _key: K, _value: V) {
+        // Placeholder implementation
+    }
+
+    /// Get baseline (instance method)
+    pub fn get_baseline<K, V>(&self, _key: &K) -> Option<V> {
+        // Placeholder implementation
+        None
+    }
+
+    /// Cache font metrics (instance method)
+    pub fn cache_font_metrics<K, V>(&self, _key: K, _value: V) {
+        // Placeholder implementation
+    }
+
+    /// Get font metrics (instance method)
+    pub fn get_font_metrics<K, V>(&self, _key: &K) -> Option<V> {
+        // Placeholder implementation
+        None
+    }
+
+    /// Create cache manager with memory limit
+    pub fn with_memory_limit(
+        memory_mb: u64,
+    ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+        let cache = GoldyloxBuilder::<String, TextMeasurement>::new()
+            .hot_tier_memory_limit_mb(memory_mb as u32)
+            .build()?;
+        Ok(Self { cache })
+    }
+
+    /// Create cache key for measurement requests
+    pub fn create_cache_key<T>(&self, request: &T) -> String
+    where
+        T: std::fmt::Debug,
+    {
+        format!("{:?}", request)
+    }
+
+    /// Check if result should be cached
+    pub fn should_cache<T>(&self, _item: &T) -> bool {
+        true // For now, cache everything
+    }
+
+    /// Optimize cache performance
+    pub fn optimize(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        // Goldylox handles optimization internally
+        Ok(())
+    }
+}
+
+impl Default for CacheManager {
+    fn default() -> Self {
+        Self::new().unwrap_or_else(|_| {
+            // Fallback cache with minimal settings if the main one fails
+            let cache = GoldyloxBuilder::<String, TextMeasurement>::new()
+                .hot_tier_max_entries(1000)
+                .build()
+                .expect("Fallback cache creation should not fail");
+            Self { cache }
+        })
+    }
+}
+
+/// Measurement cache memory usage statistics
+#[derive(Debug, Clone, Default)]
+pub struct CacheMemoryUsage {
+    pub total_bytes: usize,
+    pub used_bytes: usize,
+    pub cached_items: usize,
+}
+
+/// Measurement cache performance statistics
+#[derive(Debug, Clone, Default)]
+pub struct CacheStatistics {
+    pub hits: u64,
+    pub misses: u64,
+    pub evictions: u64,
+    pub memory_usage: CacheMemoryUsage,
+}
+
+/// Unified cache manager for measurement operations
+pub type UnifiedCacheManager = CacheManager;
+
+/// Cache types module for measurement operations
+pub mod types {
+    pub use goldylox::prelude::CacheOperationError;
+
+    pub use super::{CacheManager, CacheMemoryUsage, CacheStatistics};
+
+    /// Cache result type alias
+    pub type CacheResult<T> = Result<T, CacheOperationError>;
+
+    /// Hit status for cache operations
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum HitStatus {
+        Hit,
+        Miss,
+        Error,
+        Partial,
+    }
+}

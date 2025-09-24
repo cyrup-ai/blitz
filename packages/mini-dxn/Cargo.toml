@@ -1,0 +1,63 @@
+[package]
+name = "mini-dxn"
+description = "Mini Dioxus Native for testing Blitz"
+documentation = "https://docs.rs/mini-dxn"
+version = "0.0.0"
+license = "MIT OR Apache-2.0"
+homepage = "https://github.com/dioxuslabs/blitz"
+repository = "https://github.com/dioxuslabs/blitz"
+categories = ["web-programming", "gui"]
+edition = "2024"
+rust-version = "1.85.0"
+# This crate is only for internal use when developing Blitz.
+# The main dioxus-native crate lives in the Dioxus repo.
+publish = false
+
+[features]
+default = ["accessibility", "hot-reload", "tracing", "net", "svg", "gpu_backend"]
+svg = ["blitz-dom/svg", "blitz-paint/svg"]
+net = ["dep:tokio", "dep:blitz-net"]
+accessibility = ["blitz-shell/accessibility", "blitz-dom/accessibility"]
+autofocus = ["blitz-dom/autofocus"]
+tracing = ["dep:tracing", "blitz-shell/tracing", "blitz-dom/tracing"]
+hot-reload = ["dep:dioxus-cli-config", "dep:dioxus-devtools"]
+gpu_backend = ["dep:anyrender_vello", "dep:wgpu"]
+cpu_backend = ["dep:anyrender_vello_cpu"]
+
+[dependencies]
+# Blitz dependencies
+anyrender = { path = "../anyrender" }
+anyrender_vello = { path = "../anyrender_vello", optional = true }
+anyrender_vello_cpu = { path = "../anyrender_vello_cpu", optional = true }
+blitz-paint = { path = "../blitz-paint" }
+blitz-dom = { path = "../blitz-dom" }
+blitz-net = { path = "../blitz-net", optional = true }
+blitz-traits = { path = "../blitz-traits" }
+blitz-shell = { path = "../blitz-shell" }
+
+# DioxusLabs dependencies - MUST USE OUR FORK
+dioxus-core = { git = "https://github.com/cyrup-ai/dioxus", branch = "main", package = "dioxus-core" }
+dioxus-html = { git = "https://github.com/cyrup-ai/dioxus", branch = "main", package = "dioxus-html" }
+dioxus-hooks = { git = "https://github.com/cyrup-ai/dioxus", branch = "main", package = "dioxus-hooks" }
+dioxus-cli-config = { git = "https://github.com/cyrup-ai/dioxus", branch = "main", package = "dioxus-cli-config", optional = true }
+dioxus-devtools = { git = "https://github.com/cyrup-ai/dioxus", branch = "main", package = "dioxus-devtools", optional = true }
+
+# Windowing & Input
+winit = "0.30.12"
+keyboard-types = "0.8.1"
+wgpu = { git = "https://github.com/cyrup-ai/wgpu", branch = "main", optional = true }
+
+# IO & Networking
+tokio = { version = "1.47.1", features = ["rt-multi-thread"], optional = true }
+
+# Other dependencies
+tracing = { version = "0.1.41", optional = true }
+rustc-hash = "2.1.1"
+futures-util = "0.3.31"
+
+
+
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]

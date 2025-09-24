@@ -1,0 +1,74 @@
+[package]
+name = "wpt"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85.0"
+license = "MIT OR Apache-2.0"
+
+[features]
+default = [ "gpu",]
+gpu = [ "dep:anyrender_vello",]
+cpu = [ "dep:anyrender_vello_cpu",]
+
+[dependencies]
+blitz-html = { version = "0.1.0-alpha.5", path = "../../packages/blitz-html", default-features = false }
+blitz-traits = { version = "0.1.0-alpha.5", path = "../../packages/blitz-traits", default-features = false }
+anyrender = { version = "0.4.1", path = "../../packages/anyrender" }
+taffy = "0.9.0"
+cosmyc-text = { path = "../../cosmyc-text" }
+url = "2.5.4"
+data-url = "0.3.1"
+owo-colors = "4.2.2"
+log = "0.4.27"
+regex = "1.11.1"
+rayon = "1.10.0"
+thread_local = "1.1.9"
+bitflags = "2.9.1"
+pollster = "0.4.0"
+atomic_float = "1.1.0"
+supports-hyperlinks = "3.1.0"
+terminal-link = "0.1.0"
+os_info = "3.12.0"
+serde_json = "1.0.142"
+
+[dependencies.blitz-dom]
+version = "0.1.0-alpha.5"
+path = "../../packages/blitz-dom"
+default-features = false
+features = [ "svg", "woff-c",]
+
+[dependencies.blitz-paint]
+version = "0.1.0-alpha.5"
+path = "../../packages/blitz-paint"
+default-features = false
+features = [ "default",]
+
+[dependencies.anyrender_vello]
+optional = true
+path = "../../packages/anyrender_vello"
+
+[dependencies.anyrender_vello_cpu]
+version = "0.4.1"
+path = "../../packages/anyrender_vello_cpu"
+optional = true
+
+[dependencies.image]
+version = "0.25.6"
+features = [ "png",]
+
+[dependencies.png]
+version = "0.18.0-rc.3"
+
+[dependencies.glob]
+version = "0.3.3"
+
+[dependencies.dify]
+version = "0.7.4"
+default-features = false
+
+[dependencies.env_logger]
+version = "0.11.8"
+
+[dependencies.wptreport]
+version = "0.0.10"
+default-features = false

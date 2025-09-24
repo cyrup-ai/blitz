@@ -1,0 +1,51 @@
+[package]
+name = "blitz-font"
+description = "Comprehensive font management system for Blitz browser engine"
+documentation = "https://docs.rs/blitz-font"
+version = "0.1.0-alpha.1"
+license = "MIT OR Apache-2.0"
+homepage = "https://github.com/dioxuslabs/blitz"
+repository = "https://github.com/dioxuslabs/blitz"
+categories = ["web-programming", "gui", "text-processing"]
+edition = "2024"
+rust-version = "1.85.0"
+
+[features]
+default = ["system-fonts", "web-fonts"]
+system-fonts = []
+web-fonts = ["dep:reqwest", "dep:tokio"]
+fontconfig = ["dep:fontconfig-sys"]
+winapi = ["dep:winapi"]
+
+[dependencies]
+glyphon = { path = "../../../glyphon" }
+blitz-text = { path = "../blitz-text" }
+ttf-parser = "0.25.1"
+url = "2.5.7"
+dirs = "6.0.0"
+thiserror = "2.0.16"
+serde = { version = "1.0.226", features = ["derive"] }
+serde_json = "1.0.145"
+unicode-segmentation = "1.12.0"
+atomic = "0.6.1"
+log = "0.4.28"
+goldylox = { git = "https://github.com/cyrup-ai/goldylox", branch = "main" }
+
+# Async web font loading
+reqwest = { path = "../../../reqwest", optional = true, features = ["stream"] }
+tokio = { version = "1.47.1", optional = true, features = ["rt", "fs", "macros", "time"] }
+
+# Platform-specific dependencies
+[target.'cfg(target_os = "linux")'.dependencies]
+fontconfig-sys = { version = "2.11.1", optional = true }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+winapi = { version = "0.3.9", features = ["shlobj", "winnls", "winuser", "gl-gl"], optional = true }
+
+
+
+[dev-dependencies]
+tokio-test = "0.4.4"
+tempfile = "3.23.0"
+criterion = { version = "0.7.0", features = ["html_reports"] }
+env_logger = "0.11.8"

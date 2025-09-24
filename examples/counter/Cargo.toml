@@ -1,0 +1,27 @@
+[package]
+name = "counter"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85.0"
+license = "MIT OR Apache-2.0"
+
+[features]
+default = [ "system_fonts", "gpu_backend",]
+system_fonts = [ "blitz-dom/system_fonts",]
+gpu_backend = [ "mini-dxn/gpu_backend",]
+cpu_backend = [ "mini-dxn/cpu_backend",]
+
+[dependencies]
+idna_adapter = "1.2.1"
+
+[dependencies.mini-dxn]
+path = "../../packages/mini-dxn"
+default-features = false
+
+[dependencies.dioxus]
+path = "../../../dioxus/packages/dioxus"
+features = [ "html", "hooks", "macro", "signals",]
+
+[dependencies.blitz-dom]
+path = "../../packages/blitz-dom"
+default-features = false

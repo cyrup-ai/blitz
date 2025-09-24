@@ -1,0 +1,97 @@
+[package]
+name = "blitz-dom"
+description = "Blitz DOM implementation"
+documentation = "https://docs.rs/blitz-dom"
+version = "0.1.0-alpha.5"
+license = "MIT OR Apache-2.0"
+homepage = "https://github.com/dioxuslabs/blitz"
+repository = "https://github.com/dioxuslabs/blitz"
+categories = ["web-programming", "gui"]
+edition = "2024"
+rust-version = "1.85.0"
+
+[features]
+default = [
+    "tracing",
+    "svg",
+    "woff-c",
+    "accessibility",
+    "system_fonts",
+    "file_input",
+]
+tracing = ["dep:tracing"]
+svg = ["dep:usvg"]
+# WOFF decoding using the "woff" crate which binds to C libraries
+# ("woff" for woff2) and "sfnt2woff" for woff1).
+# Both woff1 and woff2 are supported
+woff-c = ["dep:woff"]
+# WOFF decoding using the "woff2" crate which is pure Rust
+# Only woff2 is supported. Does not work correct with all woff2 fonts
+woff-rust = ["dep:woff2"]
+accessibility = ["accesskit"]
+system_fonts = []
+autofocus = []
+file_input = []
+
+
+[dependencies]
+# Blitz dependencies
+blitz-traits = { version = "0.1.0-alpha.5", path = "../blitz-traits", default-features = false }
+stylo_taffy = { version = "0.1.0-alpha.5", path = "../stylo_taffy", default-features = false, features = ["default"] }
+
+# Servo dependencies
+style = { package = "stylo", git = "https://github.com/cyrup-ai/stylo", branch = "main", default-features = false, features = ["servo"] }
+selectors = { git = "https://github.com/cyrup-ai/stylo", branch = "main" }
+style_config = { package = "stylo_config", git = "https://github.com/cyrup-ai/stylo", branch = "main" }
+style_traits = { package = "stylo_traits", git = "https://github.com/cyrup-ai/stylo", branch = "main" }
+style_dom = { package = "stylo_dom", git = "https://github.com/cyrup-ai/stylo", branch = "main" }
+app_units = "0.7.8"
+euclid = "0.22"
+atomic_refcell = "0.1.13"
+markup5ever = { git = "https://github.com/cyrup-ai/html5ever", branch = "main" }
+smallvec = "2.0.0-alpha.11"
+
+# DioxusLabs dependencies
+taffy = { version = "0.9.1", default-features = false, features = ["std", "flexbox", "grid", "block_layout", "content_size", "calc"] }
+
+# Linebender dependencies
+accesskit = { version = "0.21.0", optional = true }
+
+peniko = "0.4"
+color = "0.3"
+# Blitz text rendering dependencies
+blitz-text = { path = "../blitz-text" }
+blitz-font = { path = "../blitz-font" }
+
+# Other dependencies
+slab = "0.4.11"
+bitflags = "2.9.4"
+tracing = { version = "0.1.41", optional = true }
+fastrand = "2.3.0"
+thiserror = "2.0"
+tokio = { version = "1.47", features = ["rt"] }
+
+# Media & Decoding
+image = { version = "0.25", default-features = false }
+usvg = { version = "0.45.1", optional = true }
+woff = { version = "0.6", default-features = false, optional = true, features = ["version2"] }
+woff2 = { package = "woff2-patched", version = "0.4.0", optional = true }
+html-escape = "0.2.13"
+percent-encoding = "2.3.2"
+
+# IO & Networking
+url = "2.5.7"
+mime = "0.3"
+
+# Input
+keyboard-types = "0.8.1"
+cursor-icon = "1"
+
+# Web atoms for string interning
+web_atoms = { git = "https://github.com/cyrup-ai/html5ever", branch = "main" }
+
+
+# HACK: Blitz doesn't need to depend on objc2 directly. But this feature flag is necessary
+# to prevent debug builds from panicking.
+[target.'cfg(any(target_vendor = "apple"))'.dependencies]
+objc2 = { version = "0.6", features = ["disable-encoding-assertions"] }
