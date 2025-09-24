@@ -942,7 +942,7 @@ dependencies = [
 [[package]]
 name = "blitz-text"
 version = "0.1.0"
-source = "git+https://github.com/cyrup-ai/blitz?branch=main#1c76b4d3a066a0a1a3a805f3987b4e811bb66c1d"
+source = "git+https://github.com/cyrup-ai/blitz?branch=main#39df7da67590a4f3516bdc953b5ef66a2b23b1eb"
 dependencies = [
  "ahash",
  "arc-swap",
@@ -6727,7 +6727,7 @@ dependencies = [
 [[package]]
 name = "vello_api"
 version = "0.1.0"
-source = "git+https://github.com/cyrup-ai/vello_api?branch=main#3c4e492883dbd1b0f33f67c2bc3763da49abcaf1"
+source = "git+https://github.com/cyrup-ai/vello_api?branch=main#3382d7e934363b899fbbe08c8a42ff278ce339ee"
 dependencies = [
  "bytemuck",
  "peniko",
@@ -6736,7 +6736,7 @@ dependencies = [
 [[package]]
 name = "vello_api"
 version = "0.1.0"
-source = "git+https://github.com/cyrup-ai/vello_api#3c4e492883dbd1b0f33f67c2bc3763da49abcaf1"
+source = "git+https://github.com/cyrup-ai/vello_api#3382d7e934363b899fbbe08c8a42ff278ce339ee"
 dependencies = [
  "bytemuck",
  "peniko",
