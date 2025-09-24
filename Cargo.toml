@@ -21,3 +21,8 @@ members = [
 [workspace.package]
 edition = "2024"
 repository = "https://github.com/cyrup-ai/blitz"
+
+[patch.crates-io]
+selectors = { git = "https://github.com/cyrup-ai/stylo", branch = "main" }
+markup5ever = { git = "https://github.com/cyrup-ai/html5ever", branch = "main" }
+web_atoms = { git = "https://github.com/cyrup-ai/html5ever", branch = "main" }

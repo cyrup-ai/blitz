@@ -2,12 +2,59 @@ use std::rc::Rc;
 
 use anyrender::{CustomPaint, Paint, PaintScene};
 use glyphon;
-use kurbo::{Affine, Rect, Shape, Stroke};
+use peniko::kurbo::{Affine, Point, Rect, Shape, Stroke};
 use peniko::{BlendMode, BrushRef, Color, Fill};
 use rustc_hash::FxHashMap;
 use vello::Renderer as VelloRenderer;
 
 use crate::{CustomPaintSource, GlyphonState, custom_paint_source::CustomPaintCtx};
+
+// Conversion functions for kurbo version compatibility (0.12.0 to 0.11.3)
+fn convert_affine_to_vello(affine: Affine) -> vello::kurbo::Affine {
+    let coeffs = affine.as_coeffs();
+    vello::kurbo::Affine::new(coeffs)
+}
+
+fn convert_stroke_to_vello(stroke: &Stroke) -> vello::kurbo::Stroke {
+    let mut vello_stroke = vello::kurbo::Stroke::new(stroke.width)
+        .with_caps(match stroke.start_cap {
+            peniko::kurbo::Cap::Butt => vello::kurbo::Cap::Butt,
+            peniko::kurbo::Cap::Round => vello::kurbo::Cap::Round,
+            peniko::kurbo::Cap::Square => vello::kurbo::Cap::Square,
+        })
+        .with_join(match stroke.join {
+            peniko::kurbo::Join::Bevel => vello::kurbo::Join::Bevel,
+            peniko::kurbo::Join::Miter => vello::kurbo::Join::Miter,
+            peniko::kurbo::Join::Round => vello::kurbo::Join::Round,
+        })
+        .with_miter_limit(stroke.miter_limit);
+    
+    // Handle dash patterns with the correct API
+    if !stroke.dash_pattern.is_empty() {
+        vello_stroke = vello_stroke.with_dashes(stroke.dash_offset, stroke.dash_pattern.as_slice());
+    }
+    
+    vello_stroke
+}
+
+fn convert_rect_to_vello(rect: Rect) -> vello::kurbo::Rect {
+    vello::kurbo::Rect::new(rect.x0, rect.y0, rect.x1, rect.y1)
+}
+
+fn convert_shape_to_vello<S: Shape>(shape: &S) -> vello::kurbo::BezPath {
+    let mut path = vello::kurbo::BezPath::new();
+    shape.path_elements(0.1).for_each(|element| {
+        use peniko::kurbo::PathEl;
+        match element {
+            PathEl::MoveTo(p) => path.move_to((p.x, p.y)),
+            PathEl::LineTo(p) => path.line_to((p.x, p.y)),
+            PathEl::QuadTo(p1, p2) => path.quad_to((p1.x, p1.y), (p2.x, p2.y)),
+            PathEl::CurveTo(p1, p2, p3) => path.curve_to((p1.x, p1.y), (p2.x, p2.y), (p3.x, p3.y)),
+            PathEl::ClosePath => path.close_path(),
+        }
+    });
+    path
+}
 
 pub struct VelloScenePainter<'r> {
     pub renderer: &'r mut VelloRenderer,
@@ -79,7 +126,9 @@ impl PaintScene for VelloScenePainter<'_> {
         transform: Affine,
         clip: &impl Shape,
     ) {
-        self.inner.push_layer(blend, alpha, transform, clip);
+        let vello_transform = convert_affine_to_vello(transform);
+        let vello_clip = convert_shape_to_vello(clip);
+        self.inner.push_layer(blend, alpha, vello_transform, &vello_clip);
     }
 
     fn pop_layer(&mut self) {
@@ -94,8 +143,12 @@ impl PaintScene for VelloScenePainter<'_> {
         brush_transform: Option<Affine>,
         shape: &impl Shape,
     ) {
+        let vello_style = convert_stroke_to_vello(style);
+        let vello_transform = convert_affine_to_vello(transform);
+        let vello_brush_transform = brush_transform.map(convert_affine_to_vello);
+        let vello_shape = convert_shape_to_vello(shape);
         self.inner
-            .stroke(style, transform, brush, brush_transform, shape);
+            .stroke(&vello_style, vello_transform, brush, vello_brush_transform, &vello_shape);
     }
 
     fn fill<'a>(
@@ -135,8 +188,11 @@ impl PaintScene for VelloScenePainter<'_> {
             }
         };
 
+        let vello_transform = convert_affine_to_vello(transform);
+        let vello_brush_transform = brush_transform.map(convert_affine_to_vello);
+        let vello_shape = convert_shape_to_vello(shape);
         self.inner
-            .fill(style, transform, brush_ref, brush_transform, shape);
+            .fill(style, vello_transform, brush_ref, vello_brush_transform, &vello_shape);
     }
 
     fn draw_box_shadow(
@@ -147,14 +203,16 @@ impl PaintScene for VelloScenePainter<'_> {
         radius: f64,
         std_dev: f64,
     ) {
+        let vello_transform = convert_affine_to_vello(transform);
+        let vello_rect = convert_rect_to_vello(rect);
         self.inner
-            .draw_blurred_rounded_rect(transform, rect, brush, radius, std_dev);
+            .draw_blurred_rounded_rect(vello_transform, vello_rect, brush, radius, std_dev);
     }
 
     fn render_text_buffer(
         &mut self,
         buffer: &blitz_text::Buffer,
-        position: kurbo::Point,
+        position: Point,
         color: peniko::Color,
         transform: Affine,
     ) {

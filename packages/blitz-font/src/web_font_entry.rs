@@ -1,11 +1,13 @@
 use std::sync::Arc;
 
 use goldylox::cache::traits::supporting_types::HashAlgorithm;
-use goldylox::prelude::*;
+use goldylox::cache::traits::{CacheValue, CompressionHint};
+use goldylox::CacheValueMetadata;
 use serde::{Deserialize, Serialize};
 use url::Url;
 
 use crate::{FontLoadStatus, error::types::FontError};
+
 
 /// Font cache key based on URL
 #[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -35,8 +37,7 @@ impl WebFontCacheKey {
 pub struct WebFontEntry {
     pub url: String,
     pub status: FontLoadStatus,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub data: Option<Arc<[u8]>>,
+    pub data: Option<Vec<u8>>,
     #[serde(skip, default = "std::time::Instant::now")]
     pub load_start: std::time::Instant,
     pub error: Option<String>,
@@ -89,7 +90,7 @@ impl WebFontEntry {
     }
 
     /// Mark as loaded with data
-    pub fn mark_loaded(&mut self, data: Arc<[u8]>, content_type: Option<String>) {
+    pub fn mark_loaded(&mut self, data: Vec<u8>, content_type: Option<String>) {
         self.size = Some(data.len() as u64);
         self.data = Some(data);
         self.content_type = content_type;

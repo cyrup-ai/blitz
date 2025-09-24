@@ -10,7 +10,7 @@ edition = "2024"
 rust-version = "1.85.0"
 
 [dependencies]
-kurbo = "0.12.0"
+# kurbo types come from peniko re-export
 peniko = "0.4.1"
 raw-window-handle = "0.6.2"
 blitz-text = { path = "../blitz-text" }

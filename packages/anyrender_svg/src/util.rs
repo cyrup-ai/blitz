@@ -8,6 +8,50 @@ use peniko::color::{self, DynamicColor};
 use peniko::{Blob, Image};
 use peniko::{Brush, Color, Fill, Mix};
 
+// Type conversion functions between kurbo 0.12.0 and peniko::kurbo 0.11.3
+pub(crate) fn convert_point_to_peniko(point: kurbo::Point) -> peniko::kurbo::Point {
+    peniko::kurbo::Point::new(point.x, point.y)
+}
+
+pub(crate) fn convert_affine_to_peniko(affine: kurbo::Affine) -> peniko::kurbo::Affine {
+    let coeffs = affine.as_coeffs();
+    peniko::kurbo::Affine::new(coeffs)
+}
+
+pub(crate) fn convert_rect_to_peniko(rect: kurbo::Rect) -> peniko::kurbo::Rect {
+    peniko::kurbo::Rect::new(rect.x0, rect.y0, rect.x1, rect.y1)
+}
+
+pub(crate) fn convert_stroke_to_peniko(stroke: &kurbo::Stroke) -> peniko::kurbo::Stroke {
+    peniko::kurbo::Stroke::new(stroke.width)
+        .with_caps(match stroke.start_cap {
+            kurbo::Cap::Butt => peniko::kurbo::Cap::Butt,
+            kurbo::Cap::Round => peniko::kurbo::Cap::Round,
+            kurbo::Cap::Square => peniko::kurbo::Cap::Square,
+        })
+        .with_join(match stroke.join {
+            kurbo::Join::Miter => peniko::kurbo::Join::Miter,
+            kurbo::Join::Round => peniko::kurbo::Join::Round,
+            kurbo::Join::Bevel => peniko::kurbo::Join::Bevel,
+        })
+        .with_miter_limit(stroke.miter_limit)
+}
+
+pub(crate) fn convert_bezpath_to_peniko(path: &kurbo::BezPath) -> peniko::kurbo::BezPath {
+    let mut peniko_path = peniko::kurbo::BezPath::new();
+    path.elements().into_iter().for_each(|element| {
+        use kurbo::PathEl;
+        match element {
+            PathEl::MoveTo(p) => peniko_path.move_to((p.x, p.y)),
+            PathEl::LineTo(p) => peniko_path.line_to((p.x, p.y)),
+            PathEl::QuadTo(p1, p2) => peniko_path.quad_to((p1.x, p1.y), (p2.x, p2.y)),
+            PathEl::CurveTo(p1, p2, p3) => peniko_path.curve_to((p1.x, p1.y), (p2.x, p2.y), (p3.x, p3.y)),
+            PathEl::ClosePath => peniko_path.close_path(),
+        }
+    });
+    peniko_path
+}
+
 pub(crate) fn to_affine(ts: &usvg::Transform) -> Affine {
     let usvg::Transform {
         sx,
@@ -168,7 +212,7 @@ pub(crate) fn to_brush(paint: &usvg::Paint, opacity: usvg::Opacity) -> Option<(B
             ]
             .map(f64::from);
             let transform = Affine::new(arr);
-            let gradient = peniko::Gradient::new_linear(start, end).with_stops(stops.as_slice());
+            let gradient = peniko::Gradient::new_linear(convert_point_to_peniko(start), convert_point_to_peniko(end)).with_stops(stops.as_slice());
             Some((Brush::Gradient(gradient), transform))
         }
         usvg::Paint::RadialGradient(gr) => {
@@ -201,9 +245,9 @@ pub(crate) fn to_brush(paint: &usvg::Paint, opacity: usvg::Opacity) -> Option<(B
             .map(f64::from);
             let transform = Affine::new(arr);
             let gradient = peniko::Gradient::new_two_point_radial(
-                start_center,
+                convert_point_to_peniko(start_center),
                 start_radius,
-                end_center,
+                convert_point_to_peniko(end_center),
                 end_radius,
             )
             .with_stops(stops.as_slice());
@@ -225,10 +269,10 @@ pub(crate) fn default_error_handler<S: PaintScene>(scene: &mut S, node: &usvg::N
     };
     scene.fill(
         Fill::NonZero,
-        Affine::IDENTITY,
+        convert_affine_to_peniko(Affine::IDENTITY),
         color::palette::css::RED.multiply_alpha(0.5),
         None,
-        &rect,
+        &convert_rect_to_peniko(rect),
     );
 }
 

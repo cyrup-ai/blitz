@@ -38,8 +38,8 @@ pub(crate) fn render_group<S: PaintScene, F: FnMut(&mut S, &usvg::Node)>(
                                 compose: peniko::Compose::SrcOver,
                             },
                             alpha,
-                            global_transform * transform,
-                            &local_path,
+                            util::convert_affine_to_peniko(global_transform * transform),
+                            &util::convert_bezpath_to_peniko(&local_path),
                         );
 
                         true
@@ -58,8 +58,8 @@ pub(crate) fn render_group<S: PaintScene, F: FnMut(&mut S, &usvg::Node)>(
                                 compose: peniko::Compose::SrcOver,
                             },
                             alpha,
-                            global_transform * transform,
-                            &rect,
+                            util::convert_affine_to_peniko(global_transform * transform),
+                            &util::convert_rect_to_peniko(rect),
                         );
 
                         true
@@ -110,7 +110,7 @@ pub(crate) fn render_group<S: PaintScene, F: FnMut(&mut S, &usvg::Node)>(
                             };
                             let image = util::into_image(decoded_image);
                             let image_ts = global_transform * util::to_affine(&img.abs_transform());
-                            scene.draw_image(&image, image_ts);
+                            scene.draw_image(&image, util::convert_affine_to_peniko(image_ts));
                         }
 
                         #[cfg(not(feature = "image"))]
@@ -158,10 +158,10 @@ fn fill<S: PaintScene, F: FnMut(&mut S, &usvg::Node)>(
                     usvg::FillRule::NonZero => Fill::NonZero,
                     usvg::FillRule::EvenOdd => Fill::EvenOdd,
                 },
-                transform,
+                util::convert_affine_to_peniko(transform),
                 BrushRef::from(&brush),
-                Some(brush_transform),
-                local_path,
+                Some(util::convert_affine_to_peniko(brush_transform)),
+                &util::convert_bezpath_to_peniko(local_path),
             );
         } else {
             error_handler(scene, node);
@@ -181,11 +181,11 @@ fn stroke<S: PaintScene, F: FnMut(&mut S, &usvg::Node)>(
         if let Some((brush, brush_transform)) = util::to_brush(stroke.paint(), stroke.opacity()) {
             let conv_stroke = util::to_stroke(stroke);
             scene.stroke(
-                &conv_stroke,
-                transform,
+                &util::convert_stroke_to_peniko(&conv_stroke),
+                util::convert_affine_to_peniko(transform),
                 &brush,
-                Some(brush_transform),
-                local_path,
+                Some(util::convert_affine_to_peniko(brush_transform)),
+                &util::convert_bezpath_to_peniko(local_path),
             );
         } else {
             error_handler(scene, node);

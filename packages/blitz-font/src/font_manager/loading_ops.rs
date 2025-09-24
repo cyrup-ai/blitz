@@ -174,7 +174,7 @@ impl FontLoadingOps {
         let mut loaded_font = LoadedFont::new(
             font_key.clone(),
             FontSource::WebFont(url),
-            Arc::clone(data),
+            Arc::from(data.as_slice()),
             0, // face index
             metrics,
         );

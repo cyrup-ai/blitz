@@ -1,12 +1,96 @@
 use std::sync::Arc;
 
 use anyrender::{Paint, PaintScene};
-use kurbo::{Affine, Rect, Shape, Stroke};
+use kurbo::{Affine, Shape};
 use peniko::{BlendMode, BrushRef, Color, Fill, Font, color::PremulRgba8};
 
 use crate::vello_cpu::{self, PaintType, Pixmap, RenderMode};
 
 const DEFAULT_TOLERANCE: f64 = 0.1;
+
+// Reverse conversion functions from peniko::kurbo (0.11.3) to kurbo (0.12.0)
+fn convert_peniko_affine_to_kurbo(affine: peniko::kurbo::Affine) -> kurbo::Affine {
+    let coeffs = affine.as_coeffs();
+    kurbo::Affine::new(coeffs)
+}
+
+fn convert_peniko_stroke_to_kurbo(stroke: &peniko::kurbo::Stroke) -> kurbo::Stroke {
+    kurbo::Stroke::new(stroke.width)
+        .with_caps(match stroke.start_cap {
+            peniko::kurbo::Cap::Butt => kurbo::Cap::Butt,
+            peniko::kurbo::Cap::Round => kurbo::Cap::Round,
+            peniko::kurbo::Cap::Square => kurbo::Cap::Square,
+        })
+        .with_join(match stroke.join {
+            peniko::kurbo::Join::Miter => kurbo::Join::Miter,
+            peniko::kurbo::Join::Round => kurbo::Join::Round,
+            peniko::kurbo::Join::Bevel => kurbo::Join::Bevel,
+        })
+        .with_miter_limit(stroke.miter_limit)
+}
+
+fn convert_peniko_point_to_kurbo(point: peniko::kurbo::Point) -> kurbo::Point {
+    kurbo::Point::new(point.x, point.y)
+}
+
+fn convert_peniko_rect_to_kurbo(rect: peniko::kurbo::Rect) -> kurbo::Rect {
+    kurbo::Rect::new(rect.x0, rect.y0, rect.x1, rect.y1)
+}
+
+fn convert_peniko_shape_to_kurbo<S: peniko::kurbo::Shape>(shape: &S) -> kurbo::BezPath {
+    let mut path = kurbo::BezPath::new();
+    shape.path_elements(DEFAULT_TOLERANCE).for_each(|element| {
+        use peniko::kurbo::PathEl;
+        match element {
+            PathEl::MoveTo(p) => path.move_to((p.x, p.y)),
+            PathEl::LineTo(p) => path.line_to((p.x, p.y)),
+            PathEl::QuadTo(p1, p2) => path.quad_to((p1.x, p1.y), (p2.x, p2.y)),
+            PathEl::CurveTo(p1, p2, p3) => path.curve_to((p1.x, p1.y), (p2.x, p2.y), (p3.x, p3.y)),
+            PathEl::ClosePath => path.close_path(),
+        }
+    });
+    path
+}
+
+// Type conversion functions between kurbo 0.12.0 and kurbo 0.11.3
+fn convert_affine_to_peniko(affine: kurbo::Affine) -> peniko::kurbo::Affine {
+    let coeffs = affine.as_coeffs();
+    peniko::kurbo::Affine::new(coeffs)
+}
+
+fn convert_stroke_to_peniko(stroke: &kurbo::Stroke) -> peniko::kurbo::Stroke {
+    // Basic stroke with width and caps/joins - skip dashes for now to simplify
+    peniko::kurbo::Stroke::new(stroke.width)
+        .with_caps(match stroke.start_cap {
+            kurbo::Cap::Butt => peniko::kurbo::Cap::Butt,
+            kurbo::Cap::Round => peniko::kurbo::Cap::Round,
+            kurbo::Cap::Square => peniko::kurbo::Cap::Square,
+        })
+        .with_join(match stroke.join {
+            kurbo::Join::Miter => peniko::kurbo::Join::Miter,
+            kurbo::Join::Round => peniko::kurbo::Join::Round,
+            kurbo::Join::Bevel => peniko::kurbo::Join::Bevel,
+        })
+        .with_miter_limit(stroke.miter_limit)
+}
+
+fn convert_bezpath_to_peniko(path: &kurbo::BezPath) -> peniko::kurbo::BezPath {
+    let mut peniko_path = peniko::kurbo::BezPath::new();
+    for el in path.elements() {
+        match el {
+            kurbo::PathEl::MoveTo(p) => peniko_path.move_to((p.x, p.y)),
+            kurbo::PathEl::LineTo(p) => peniko_path.line_to((p.x, p.y)),
+            kurbo::PathEl::QuadTo(p1, p2) => peniko_path.quad_to((p1.x, p1.y), (p2.x, p2.y)),
+            kurbo::PathEl::CurveTo(p1, p2, p3) => peniko_path.curve_to((p1.x, p1.y), (p2.x, p2.y), (p3.x, p3.y)),
+            kurbo::PathEl::ClosePath => peniko_path.close_path(),
+        }
+    }
+    peniko_path
+}
+
+fn convert_rect_to_peniko(rect: kurbo::Rect) -> peniko::kurbo::Rect {
+    peniko::kurbo::Rect::new(rect.x0, rect.y0, rect.x1, rect.y1)
+}
 
 fn brush_ref_to_paint_type<'a>(brush_ref: BrushRef<'a>) -> PaintType {
     match brush_ref {
@@ -100,12 +184,14 @@ impl PaintScene for VelloCpuScenePainter {
         &mut self,
         blend: impl Into<BlendMode>,
         alpha: f32,
-        transform: Affine,
-        clip: &impl Shape,
+        transform: peniko::kurbo::Affine,
+        clip: &impl peniko::kurbo::Shape,
     ) {
-        self.0.set_transform(transform);
+        let transform = convert_peniko_affine_to_kurbo(transform);
+        let clip = convert_peniko_shape_to_kurbo(clip);
+        self.0.set_transform(convert_affine_to_peniko(transform));
         self.0.push_layer(
-            Some(&clip.into_path(DEFAULT_TOLERANCE)),
+            Some(&convert_bezpath_to_peniko(&clip.into_path(DEFAULT_TOLERANCE))),
             Some(blend.into()),
             Some(alpha),
             None,
@@ -118,46 +204,55 @@ impl PaintScene for VelloCpuScenePainter {
 
     fn stroke<'a>(
         &mut self,
-        style: &Stroke,
-        transform: Affine,
+        style: &peniko::kurbo::Stroke,
+        transform: peniko::kurbo::Affine,
         brush: impl Into<BrushRef<'a>>,
-        brush_transform: Option<Affine>,
-        shape: &impl Shape,
+        brush_transform: Option<peniko::kurbo::Affine>,
+        shape: &impl peniko::kurbo::Shape,
     ) {
-        self.0.set_transform(transform);
-        self.0.set_stroke(style.clone());
+        let style = convert_peniko_stroke_to_kurbo(style);
+        let transform = convert_peniko_affine_to_kurbo(transform);
+        let brush_transform = brush_transform.map(convert_peniko_affine_to_kurbo);
+        let shape = convert_peniko_shape_to_kurbo(shape);
+        self.0.set_transform(convert_affine_to_peniko(transform));
+        self.0.set_stroke(convert_stroke_to_peniko(&style));
         self.0.set_paint(brush_ref_to_paint_type(brush.into()));
         self.0
-            .set_paint_transform(brush_transform.unwrap_or(Affine::IDENTITY));
-        self.0.stroke_path(&shape.into_path(DEFAULT_TOLERANCE));
+            .set_paint_transform(convert_affine_to_peniko(brush_transform.unwrap_or(Affine::IDENTITY)));
+        self.0.stroke_path(&convert_bezpath_to_peniko(&shape.into_path(DEFAULT_TOLERANCE)));
     }
 
     fn fill<'a>(
         &mut self,
         style: Fill,
-        transform: Affine,
+        transform: peniko::kurbo::Affine,
         brush: impl Into<Paint<'a>>,
-        brush_transform: Option<Affine>,
-        shape: &impl Shape,
+        brush_transform: Option<peniko::kurbo::Affine>,
+        shape: &impl peniko::kurbo::Shape,
     ) {
-        self.0.set_transform(transform);
+        let transform = convert_peniko_affine_to_kurbo(transform);
+        let brush_transform = brush_transform.map(convert_peniko_affine_to_kurbo);
+        let shape = convert_peniko_shape_to_kurbo(shape);
+        self.0.set_transform(convert_affine_to_peniko(transform));
         self.0.set_fill_rule(style);
         self.0
             .set_paint(anyrender_paint_to_vello_cpu_paint(brush.into()));
         self.0
-            .set_paint_transform(brush_transform.unwrap_or(Affine::IDENTITY));
-        self.0.fill_path(&shape.into_path(DEFAULT_TOLERANCE));
+            .set_paint_transform(convert_affine_to_peniko(brush_transform.unwrap_or(Affine::IDENTITY)));
+        self.0.fill_path(&convert_bezpath_to_peniko(&shape.into_path(DEFAULT_TOLERANCE)));
     }
 
     fn render_text_buffer(
         &mut self,
         buffer: &blitz_text::Buffer,
-        position: kurbo::Point,
+        position: peniko::kurbo::Point,
         color: peniko::Color,
-        transform: Affine,
+        transform: peniko::kurbo::Affine,
     ) {
+        let position = convert_peniko_point_to_kurbo(position);
+        let transform = convert_peniko_affine_to_kurbo(transform);
         // Set the base transform and paint color
-        self.0.set_transform(transform);
+        self.0.set_transform(convert_affine_to_peniko(transform));
         self.0
             .set_paint(brush_ref_to_paint_type(BrushRef::Solid(color)));
         self.0.set_fill_rule(Fill::NonZero);
@@ -205,9 +300,9 @@ impl PaintScene for VelloCpuScenePainter {
                     });
 
                 // Convert blitz_text glyphs to vello_cpu glyphs
-                let vello_glyphs: Vec<crate::vello_cpu::Glyph> = glyphs
+                let vello_glyphs: Vec<crate::vello_cpu::vello_common::glyph::Glyph> = glyphs
                     .iter()
-                    .map(|layout_glyph| crate::vello_cpu::Glyph {
+                    .map(|layout_glyph| crate::vello_cpu::vello_common::glyph::Glyph {
                         id: layout_glyph.glyph_id as u32,
                         x: position.x as f32 + layout_glyph.x,
                         y: position.y as f32 + run.line_y + layout_glyph.y,
@@ -225,15 +320,17 @@ impl PaintScene for VelloCpuScenePainter {
     }
     fn draw_box_shadow(
         &mut self,
-        transform: Affine,
-        rect: Rect,
+        transform: peniko::kurbo::Affine,
+        rect: peniko::kurbo::Rect,
         color: Color,
         radius: f64,
         std_dev: f64,
     ) {
-        self.0.set_transform(transform);
+        let transform = convert_peniko_affine_to_kurbo(transform);
+        let rect = convert_peniko_rect_to_kurbo(rect);
+        self.0.set_transform(convert_affine_to_peniko(transform));
         self.0.set_paint(PaintType::Solid(color));
         self.0
-            .fill_blurred_rounded_rect(&rect, radius as f32, std_dev as f32);
+            .fill_blurred_rounded_rect(&convert_rect_to_peniko(rect), radius as f32, std_dev as f32);
     }
 }

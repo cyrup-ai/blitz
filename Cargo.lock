@@ -274,7 +274,6 @@ name = "anyrender"
 version = "0.4.1"
 dependencies = [
  "blitz-text 0.1.0",
- "kurbo 0.12.0",
  "peniko",
  "raw-window-handle",
 ]
@@ -301,7 +300,6 @@ dependencies = [
  "flume",
  "futures-intrusive",
  "glyphon 0.9.0 (git+https://github.com/cyrup-ai/glyphon?branch=main)",
- "kurbo 0.12.0",
  "log",
  "peniko",
  "pollster",
@@ -324,7 +322,10 @@ dependencies = [
  "png 0.18.0",
  "smallvec 2.0.0-alpha.11",
  "softbuffer",
- "vello_cpu",
+ "vello_api 0.1.0 (git+https://github.com/cyrup-ai/vello_api)",
+ "vello_common 0.1.0",
+ "vello_cpu 0.0.1",
+ "vello_cpu 0.1.0",
 ]
 
 [[package]]
@@ -774,14 +775,14 @@ dependencies = [
  "objc2 0.6.2",
  "peniko",
  "percent-encoding",
- "selectors 0.30.0 (git+https://github.com/cyrup-ai/stylo?branch=main)",
+ "selectors",
  "slab",
  "smallvec 2.0.0-alpha.11",
  "stylo",
- "stylo_config 0.5.0 (git+https://github.com/cyrup-ai/stylo?branch=main)",
- "stylo_dom 0.5.0 (git+https://github.com/cyrup-ai/stylo?branch=main)",
+ "stylo_config",
+ "stylo_dom",
  "stylo_taffy",
- "stylo_traits 0.5.0 (git+https://github.com/cyrup-ai/stylo?branch=main)",
+ "stylo_traits",
  "taffy",
  "thiserror 2.0.16",
  "tokio",
@@ -863,7 +864,7 @@ dependencies = [
  "peniko",
  "png 0.18.0",
  "stylo",
- "stylo_traits 0.5.0 (git+https://github.com/cyrup-ai/stylo?branch=main)",
+ "stylo_traits",
  "taffy",
  "tempfile",
  "tokio",
@@ -940,7 +941,7 @@ dependencies = [
 [[package]]
 name = "blitz-text"
 version = "0.1.0"
-source = "git+https://github.com/cyrup-ai/blitz?branch=main#04270380cf5c67fede3534dac9e5afe6d3904b0c"
+source = "git+https://github.com/cyrup-ai/blitz?branch=main#3ffd21546f58dbfb2ad5ba62fec52c0fdc88700c"
 dependencies = [
  "ahash",
  "arc-swap",
@@ -1282,7 +1283,7 @@ dependencies = [
 [[package]]
 name = "codespan-reporting"
 version = "0.12.0"
-source = "git+https://github.com/cyrup-ai/codespan?branch=main#7f52c672f237d722a74e3e07d83c88c4faaeb916"
+source = "git+https://github.com/cyrup-ai/codespan?branch=main#0def8c4dd80be0bc5fbf0a927458799841179c89"
 dependencies = [
  "serde",
  "termcolor",
@@ -1787,12 +1788,12 @@ dependencies = [
 [[package]]
 name = "dioxus-cli-config"
 version = "0.7.0-alpha.2"
-source = "git+https://github.com/cyrup-ai/dioxus?branch=main#7ae925c592be4cce24d1405937a4cc5e2c408f24"
+source = "git+https://github.com/cyrup-ai/dioxus?branch=main#1602dbb5ffa9eae12830f66ee6eb90ff41b3c38c"
 
 [[package]]
 name = "dioxus-core"
 version = "0.7.0-alpha.2"
-source = "git+https://github.com/cyrup-ai/dioxus?branch=main#7ae925c592be4cce24d1405937a4cc5e2c408f24"
+source = "git+https://github.com/cyrup-ai/dioxus?branch=main#1602dbb5ffa9eae12830f66ee6eb90ff41b3c38c"
 dependencies = [
  "const_format",
  "dioxus-core-types",
@@ -1813,7 +1814,7 @@ dependencies = [
 [[package]]
 name = "dioxus-core-macro"
 version = "0.7.0-alpha.2"
-source = "git+https://github.com/cyrup-ai/dioxus?branch=main#7ae925c592be4cce24d1405937a4cc5e2c408f24"
+source = "git+https://github.com/cyrup-ai/dioxus?branch=main#1602dbb5ffa9eae12830f66ee6eb90ff41b3c38c"
 dependencies = [
  "convert_case",
  "dioxus-rsx",
@@ -1825,12 +1826,12 @@ dependencies = [
 [[package]]
 name = "dioxus-core-types"
 version = "0.7.0-alpha.2"
-source = "git+https://github.com/cyrup-ai/dioxus?branch=main#7ae925c592be4cce24d1405937a4cc5e2c408f24"
+source = "git+https://github.com/cyrup-ai/dioxus?branch=main#1602dbb5ffa9eae12830f66ee6eb90ff41b3c38c"
 
 [[package]]
 name = "dioxus-devtools"
 version = "0.7.0-alpha.2"
-source = "git+https://github.com/cyrup-ai/dioxus?branch=main#7ae925c592be4cce24d1405937a4cc5e2c408f24"
+source = "git+https://github.com/cyrup-ai/dioxus?branch=main#1602dbb5ffa9eae12830f66ee6eb90ff41b3c38c"
 dependencies = [
  "dioxus-cli-config",
  "dioxus-core",
@@ -1848,7 +1849,7 @@ dependencies = [
 [[package]]
 name = "dioxus-devtools-types"
 version = "0.7.0-alpha.2"
-source = "git+https://github.com/cyrup-ai/dioxus?branch=main#7ae925c592be4cce24d1405937a4cc5e2c408f24"
+source = "git+https://github.com/cyrup-ai/dioxus?branch=main#1602dbb5ffa9eae12830f66ee6eb90ff41b3c38c"
 dependencies = [
  "dioxus-core",
  "serde",
@@ -1858,7 +1859,7 @@ dependencies = [
 [[package]]
 name = "dioxus-hooks"
 version = "0.7.0-alpha.2"
-source = "git+https://github.com/cyrup-ai/dioxus?branch=main#7ae925c592be4cce24d1405937a4cc5e2c408f24"
+source = "git+https://github.com/cyrup-ai/dioxus?branch=main#1602dbb5ffa9eae12830f66ee6eb90ff41b3c38c"
 dependencies = [
  "dioxus-core",
  "dioxus-signals",
@@ -1874,7 +1875,7 @@ dependencies = [
 [[package]]
 name = "dioxus-html"
 version = "0.7.0-alpha.2"
-source = "git+https://github.com/cyrup-ai/dioxus?branch=main#7ae925c592be4cce24d1405937a4cc5e2c408f24"
+source = "git+https://github.com/cyrup-ai/dioxus?branch=main#1602dbb5ffa9eae12830f66ee6eb90ff41b3c38c"
 dependencies = [
  "async-trait",
  "dioxus-core",
@@ -1898,7 +1899,7 @@ dependencies = [
 [[package]]
 name = "dioxus-html-internal-macro"
 version = "0.7.0-alpha.2"
-source = "git+https://github.com/cyrup-ai/dioxus?branch=main#7ae925c592be4cce24d1405937a4cc5e2c408f24"
+source = "git+https://github.com/cyrup-ai/dioxus?branch=main#1602dbb5ffa9eae12830f66ee6eb90ff41b3c38c"
 dependencies = [
  "convert_case",
  "proc-macro2",
@@ -1909,7 +1910,7 @@ dependencies = [
 [[package]]
 name = "dioxus-rsx"
 version = "0.7.0-alpha.2"
-source = "git+https://github.com/cyrup-ai/dioxus?branch=main#7ae925c592be4cce24d1405937a4cc5e2c408f24"
+source = "git+https://github.com/cyrup-ai/dioxus?branch=main#1602dbb5ffa9eae12830f66ee6eb90ff41b3c38c"
 dependencies = [
  "proc-macro2",
  "proc-macro2-diagnostics",
@@ -1920,7 +1921,7 @@ dependencies = [
 [[package]]
 name = "dioxus-signals"
 version = "0.7.0-alpha.2"
-source = "git+https://github.com/cyrup-ai/dioxus?branch=main#7ae925c592be4cce24d1405937a4cc5e2c408f24"
+source = "git+https://github.com/cyrup-ai/dioxus?branch=main#1602dbb5ffa9eae12830f66ee6eb90ff41b3c38c"
 dependencies = [
  "dioxus-core",
  "futures-channel",
@@ -1950,7 +1951,7 @@ dependencies = [
  "libc 0.2.176",
  "option-ext",
  "redox_users",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.0",
 ]
 
 [[package]]
@@ -2181,7 +2182,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc 0.2.176",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.0",
 ]
 
 [[package]]
@@ -2543,7 +2544,7 @@ dependencies = [
 [[package]]
 name = "generational-box"
 version = "0.7.0-alpha.2"
-source = "git+https://github.com/cyrup-ai/dioxus?branch=main#7ae925c592be4cce24d1405937a4cc5e2c408f24"
+source = "git+https://github.com/cyrup-ai/dioxus?branch=main#1602dbb5ffa9eae12830f66ee6eb90ff41b3c38c"
 dependencies = [
  "parking_lot",
  "tracing",
@@ -2663,7 +2664,7 @@ dependencies = [
 [[package]]
 name = "glyphon"
 version = "0.9.0"
-source = "git+https://github.com/cyrup-ai/glyphon?branch=main#03710a46f88e1f9fb20569b787da8e3a9e2a0651"
+source = "git+https://github.com/cyrup-ai/glyphon?branch=main#ae5595897f3fa1519e22c27f63ca686754aa89e9"
 dependencies = [
  "cosmyc-text",
  "etagere",
@@ -2676,7 +2677,7 @@ dependencies = [
 [[package]]
 name = "goldylox"
 version = "0.1.0"
-source = "git+https://github.com/cyrup-ai/goldylox?branch=main#65bc79fe61fcf7571cd643f07688f8585367e2e1"
+source = "git+https://github.com/cyrup-ai/goldylox?branch=main#a8af558390df9075898033f93823913e46cdf3d7"
 dependencies = [
  "ahash",
  "arc-swap",
@@ -3451,7 +3452,7 @@ dependencies = [
 [[package]]
 name = "lazy-js-bundle"
 version = "0.7.0-alpha.2"
-source = "git+https://github.com/cyrup-ai/dioxus?branch=main#7ae925c592be4cce24d1405937a4cc5e2c408f24"
+source = "git+https://github.com/cyrup-ai/dioxus?branch=main#1602dbb5ffa9eae12830f66ee6eb90ff41b3c38c"
 
 [[package]]
 name = "lazy_static"
@@ -3831,7 +3832,7 @@ dependencies = [
 [[package]]
 name = "naga"
 version = "26.0.1"
-source = "git+https://github.com/cyrup-ai/wgpu?branch=main#9a2d982d02e1d8f791495d1049360c3d8b2e8e78"
+source = "git+https://github.com/cyrup-ai/wgpu?branch=main#ed1c8b6ae35e393eda9f1b73bd58646d7a17200b"
 dependencies = [
  "arrayvec",
  "bit-set",
@@ -5198,7 +5199,7 @@ dependencies = [
  "errno",
  "libc 0.2.176",
  "linux-raw-sys 0.11.0",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.0",
 ]
 
 [[package]]
@@ -5344,25 +5345,7 @@ dependencies = [
 [[package]]
 name = "selectors"
 version = "0.30.0"
-source = "git+https://github.com/cyrup-ai/stylo?branch=main#7882878764e8f88b22f82a3ba0dbae5847f480e9"
-dependencies = [
- "bitflags 2.9.4",
- "cssparser",
- "derive_more",
- "fxhash",
- "log",
- "new_debug_unreachable",
- "phf 0.13.1",
- "phf_codegen",
- "precomputed-hash",
- "servo_arc",
- "smallvec 2.0.0-alpha.11",
-]
-
-[[package]]
-name = "selectors"
-version = "0.30.0"
-source = "git+https://github.com/cyrup-ai/stylo#7882878764e8f88b22f82a3ba0dbae5847f480e9"
+source = "git+https://github.com/cyrup-ai/stylo?branch=main#62c8936d98f1a4f1caad07a941b9f89aff083c99"
 dependencies = [
  "bitflags 2.9.4",
  "cssparser",
@@ -5463,7 +5446,7 @@ dependencies = [
 [[package]]
 name = "servo_arc"
 version = "0.4.1"
-source = "git+https://github.com/cyrup-ai/stylo#7882878764e8f88b22f82a3ba0dbae5847f480e9"
+source = "git+https://github.com/cyrup-ai/stylo?branch=main#62c8936d98f1a4f1caad07a941b9f89aff083c99"
 dependencies = [
  "serde",
  "stable_deref_trait",
@@ -5739,7 +5722,7 @@ dependencies = [
 [[package]]
 name = "stylo"
 version = "0.5.0"
-source = "git+https://github.com/cyrup-ai/stylo?branch=main#7882878764e8f88b22f82a3ba0dbae5847f480e9"
+source = "git+https://github.com/cyrup-ai/stylo?branch=main#62c8936d98f1a4f1caad07a941b9f89aff083c99"
 dependencies = [
  "app_units",
  "arrayvec",
@@ -5769,7 +5752,7 @@ dependencies = [
  "precomputed-hash",
  "rayon",
  "rayon-core",
- "selectors 0.30.0 (git+https://github.com/cyrup-ai/stylo)",
+ "selectors",
  "serde",
  "servo_arc",
  "smallbitvec",
@@ -5777,12 +5760,12 @@ dependencies = [
  "static_assertions",
  "string_cache",
  "stylo_atoms",
- "stylo_config 0.5.0 (git+https://github.com/cyrup-ai/stylo)",
+ "stylo_config",
  "stylo_derive",
- "stylo_dom 0.5.0 (git+https://github.com/cyrup-ai/stylo)",
+ "stylo_dom",
  "stylo_malloc_size_of",
  "stylo_static_prefs",
- "stylo_traits 0.5.0 (git+https://github.com/cyrup-ai/stylo)",
+ "stylo_traits",
  "thin-vec",
  "to_shmem",
  "to_shmem_derive",
@@ -5796,7 +5779,7 @@ dependencies = [
 [[package]]
 name = "stylo_atoms"
 version = "0.5.0"
-source = "git+https://github.com/cyrup-ai/stylo#7882878764e8f88b22f82a3ba0dbae5847f480e9"
+source = "git+https://github.com/cyrup-ai/stylo?branch=main#62c8936d98f1a4f1caad07a941b9f89aff083c99"
 dependencies = [
  "string_cache",
  "string_cache_codegen",
@@ -5805,17 +5788,12 @@ dependencies = [
 [[package]]
 name = "stylo_config"
 version = "0.5.0"
-source = "git+https://github.com/cyrup-ai/stylo?branch=main#7882878764e8f88b22f82a3ba0dbae5847f480e9"
-
-[[package]]
-name = "stylo_config"
-version = "0.5.0"
-source = "git+https://github.com/cyrup-ai/stylo#7882878764e8f88b22f82a3ba0dbae5847f480e9"
+source = "git+https://github.com/cyrup-ai/stylo?branch=main#62c8936d98f1a4f1caad07a941b9f89aff083c99"
 
 [[package]]
 name = "stylo_derive"
 version = "0.5.0"
-source = "git+https://github.com/cyrup-ai/stylo#7882878764e8f88b22f82a3ba0dbae5847f480e9"
+source = "git+https://github.com/cyrup-ai/stylo?branch=main#62c8936d98f1a4f1caad07a941b9f89aff083c99"
 dependencies = [
  "darling",
  "proc-macro2",
@@ -5827,16 +5805,7 @@ dependencies = [
 [[package]]
 name = "stylo_dom"
 version = "0.5.0"
-source = "git+https://github.com/cyrup-ai/stylo?branch=main#7882878764e8f88b22f82a3ba0dbae5847f480e9"
-dependencies = [
- "bitflags 2.9.4",
- "stylo_malloc_size_of",
-]
-
-[[package]]
-name = "stylo_dom"
-version = "0.5.0"
-source = "git+https://github.com/cyrup-ai/stylo#7882878764e8f88b22f82a3ba0dbae5847f480e9"
+source = "git+https://github.com/cyrup-ai/stylo?branch=main#62c8936d98f1a4f1caad07a941b9f89aff083c99"
 dependencies = [
  "bitflags 2.9.4",
  "stylo_malloc_size_of",
@@ -5845,12 +5814,12 @@ dependencies = [
 [[package]]
 name = "stylo_malloc_size_of"
 version = "0.5.0"
-source = "git+https://github.com/cyrup-ai/stylo#7882878764e8f88b22f82a3ba0dbae5847f480e9"
+source = "git+https://github.com/cyrup-ai/stylo?branch=main#62c8936d98f1a4f1caad07a941b9f89aff083c99"
 dependencies = [
  "app_units",
  "cssparser",
  "euclid",
- "selectors 0.30.0 (git+https://github.com/cyrup-ai/stylo)",
+ "selectors",
  "servo_arc",
  "smallbitvec",
  "smallvec 2.0.0-alpha.11",
@@ -5862,7 +5831,7 @@ dependencies = [
 [[package]]
 name = "stylo_static_prefs"
 version = "0.5.0"
-source = "git+https://github.com/cyrup-ai/stylo#7882878764e8f88b22f82a3ba0dbae5847f480e9"
+source = "git+https://github.com/cyrup-ai/stylo?branch=main#62c8936d98f1a4f1caad07a941b9f89aff083c99"
 
 [[package]]
 name = "stylo_taffy"
@@ -5877,33 +5846,14 @@ dependencies = [
 [[package]]
 name = "stylo_traits"
 version = "0.5.0"
-source = "git+https://github.com/cyrup-ai/stylo?branch=main#7882878764e8f88b22f82a3ba0dbae5847f480e9"
+source = "git+https://github.com/cyrup-ai/stylo?branch=main#62c8936d98f1a4f1caad07a941b9f89aff083c99"
 dependencies = [
  "app_units",
  "bitflags 2.9.4",
  "cssparser",
  "euclid",
  "malloc_size_of_derive",
- "selectors 0.30.0 (git+https://github.com/cyrup-ai/stylo)",
- "serde",
- "servo_arc",
- "stylo_malloc_size_of",
- "thin-vec",
- "to_shmem",
- "to_shmem_derive",
-]
-
-[[package]]
-name = "stylo_traits"
-version = "0.5.0"
-source = "git+https://github.com/cyrup-ai/stylo#7882878764e8f88b22f82a3ba0dbae5847f480e9"
-dependencies = [
- "app_units",
- "bitflags 2.9.4",
- "cssparser",
- "euclid",
- "malloc_size_of_derive",
- "selectors 0.30.0 (git+https://github.com/cyrup-ai/stylo)",
+ "selectors",
  "serde",
  "servo_arc",
  "stylo_atoms",
@@ -5917,7 +5867,7 @@ dependencies = [
 [[package]]
 name = "subsecond"
 version = "0.7.0-alpha.2"
-source = "git+https://github.com/cyrup-ai/dioxus?branch=main#7ae925c592be4cce24d1405937a4cc5e2c408f24"
+source = "git+https://github.com/cyrup-ai/dioxus?branch=main#1602dbb5ffa9eae12830f66ee6eb90ff41b3c38c"
 dependencies = [
  "js-sys",
  "libc 1.0.0-alpha.1",
@@ -5935,7 +5885,7 @@ dependencies = [
 [[package]]
 name = "subsecond-types"
 version = "0.7.0-alpha.2"
-source = "git+https://github.com/cyrup-ai/dioxus?branch=main#7ae925c592be4cce24d1405937a4cc5e2c408f24"
+source = "git+https://github.com/cyrup-ai/dioxus?branch=main#1602dbb5ffa9eae12830f66ee6eb90ff41b3c38c"
 dependencies = [
  "serde",
 ]
@@ -6062,7 +6012,7 @@ dependencies = [
  "getrandom 0.3.3",
  "once_cell",
  "rustix 1.1.2",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.0",
 ]
 
 [[package]]
@@ -6275,7 +6225,7 @@ checksum = "1f3ccbac311fea05f86f61904b462b55fb3df8837a366dfc601a0161d0532f20"
 [[package]]
 name = "to_shmem"
 version = "0.2.0"
-source = "git+https://github.com/cyrup-ai/stylo#7882878764e8f88b22f82a3ba0dbae5847f480e9"
+source = "git+https://github.com/cyrup-ai/stylo?branch=main#62c8936d98f1a4f1caad07a941b9f89aff083c99"
 dependencies = [
  "cssparser",
  "servo_arc",
@@ -6288,7 +6238,7 @@ dependencies = [
 [[package]]
 name = "to_shmem_derive"
 version = "0.1.0"
-source = "git+https://github.com/cyrup-ai/stylo#7882878764e8f88b22f82a3ba0dbae5847f480e9"
+source = "git+https://github.com/cyrup-ai/stylo?branch=main#62c8936d98f1a4f1caad07a941b9f89aff083c99"
 dependencies = [
  "darling",
  "proc-macro2",
@@ -6785,6 +6735,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "vello_api"
+version = "0.1.0"
+source = "git+https://github.com/cyrup-ai/vello_api?branch=main#3c4e492883dbd1b0f33f67c2bc3763da49abcaf1"
+dependencies = [
+ "bytemuck",
+ "peniko",
+]
+
+[[package]]
+name = "vello_api"
+version = "0.1.0"
+source = "git+https://github.com/cyrup-ai/vello_api#3c4e492883dbd1b0f33f67c2bc3763da49abcaf1"
+dependencies = [
+ "bytemuck",
+ "peniko",
+]
+
+[[package]]
 name = "vello_common"
 version = "0.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6798,12 +6766,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "vello_common"
+version = "0.1.0"
+source = "git+https://github.com/cyrup-ai/vello_common#931c94281c69ef0620379808fdd912f07f9af4a3"
+dependencies = [
+ "bytemuck",
+ "skrifa",
+ "smallvec 1.15.1",
+ "vello_api 0.1.0 (git+https://github.com/cyrup-ai/vello_api?branch=main)",
+]
+
+[[package]]
 name = "vello_cpu"
 version = "0.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a45e0a6b777abb4354e15146ecf95bac03aada7a85024fd47762f56095b32896"
 dependencies = [
- "vello_common",
+ "vello_common 0.0.1",
+]
+
+[[package]]
+name = "vello_cpu"
+version = "0.1.0"
+source = "git+https://github.com/cyrup-ai/vello_cpu#6fcd86137d63bc17a566c1d7d71ba2d9d9941a19"
+dependencies = [
+ "vello_api 0.1.0 (git+https://github.com/cyrup-ai/vello_api)",
+ "vello_common 0.1.0",
 ]
 
 [[package]]
@@ -7162,7 +7150,7 @@ checksum = "a751b3277700db47d3e574514de2eced5e54dc8a5436a3bf7a0b248b2cee16f3"
 [[package]]
 name = "wgpu"
 version = "26.0.1"
-source = "git+https://github.com/cyrup-ai/wgpu?branch=main#9a2d982d02e1d8f791495d1049360c3d8b2e8e78"
+source = "git+https://github.com/cyrup-ai/wgpu?branch=main#ed1c8b6ae35e393eda9f1b73bd58646d7a17200b"
 dependencies = [
  "arrayvec",
  "bitflags 2.9.4",
@@ -7190,7 +7178,7 @@ dependencies = [
 [[package]]
 name = "wgpu-core"
 version = "26.0.1"
-source = "git+https://github.com/cyrup-ai/wgpu?branch=main#9a2d982d02e1d8f791495d1049360c3d8b2e8e78"
+source = "git+https://github.com/cyrup-ai/wgpu?branch=main#ed1c8b6ae35e393eda9f1b73bd58646d7a17200b"
 dependencies = [
  "arrayvec",
  "bit-set",
@@ -7220,7 +7208,7 @@ dependencies = [
 [[package]]
 name = "wgpu-core-deps-apple"
 version = "26.0.1"
-source = "git+https://github.com/cyrup-ai/wgpu?branch=main#9a2d982d02e1d8f791495d1049360c3d8b2e8e78"
+source = "git+https://github.com/cyrup-ai/wgpu?branch=main#ed1c8b6ae35e393eda9f1b73bd58646d7a17200b"
 dependencies = [
  "wgpu-hal",
 ]
@@ -7228,7 +7216,7 @@ dependencies = [
 [[package]]
 name = "wgpu-core-deps-emscripten"
 version = "26.0.1"
-source = "git+https://github.com/cyrup-ai/wgpu?branch=main#9a2d982d02e1d8f791495d1049360c3d8b2e8e78"
+source = "git+https://github.com/cyrup-ai/wgpu?branch=main#ed1c8b6ae35e393eda9f1b73bd58646d7a17200b"
 dependencies = [
  "wgpu-hal",
 ]
@@ -7236,7 +7224,7 @@ dependencies = [
 [[package]]
 name = "wgpu-core-deps-windows-linux-android"
 version = "26.0.1"
-source = "git+https://github.com/cyrup-ai/wgpu?branch=main#9a2d982d02e1d8f791495d1049360c3d8b2e8e78"
+source = "git+https://github.com/cyrup-ai/wgpu?branch=main#ed1c8b6ae35e393eda9f1b73bd58646d7a17200b"
 dependencies = [
  "wgpu-hal",
 ]
@@ -7244,7 +7232,7 @@ dependencies = [
 [[package]]
 name = "wgpu-hal"
 version = "26.0.1"
-source = "git+https://github.com/cyrup-ai/wgpu?branch=main#9a2d982d02e1d8f791495d1049360c3d8b2e8e78"
+source = "git+https://github.com/cyrup-ai/wgpu?branch=main#ed1c8b6ae35e393eda9f1b73bd58646d7a17200b"
 dependencies = [
  "android_system_properties",
  "arrayvec",
@@ -7291,7 +7279,7 @@ dependencies = [
 [[package]]
 name = "wgpu-types"
 version = "26.0.1"
-source = "git+https://github.com/cyrup-ai/wgpu?branch=main#9a2d982d02e1d8f791495d1049360c3d8b2e8e78"
+source = "git+https://github.com/cyrup-ai/wgpu?branch=main#ed1c8b6ae35e393eda9f1b73bd58646d7a17200b"
 dependencies = [
  "bitflags 2.9.4",
  "bytemuck",
@@ -7334,7 +7322,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.52.0",
+ "windows-sys 0.61.0",
 ]
 
 [[package]]

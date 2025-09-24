@@ -29,7 +29,7 @@
 
 use std::sync::Arc;
 
-use kurbo::{Affine, Rect, Shape, Stroke};
+use peniko::kurbo::{Affine, Point, Rect, Shape, Stroke};
 use peniko::{BlendMode, BrushRef, Color, Fill, Image};
 
 pub mod wasm_send_sync;
@@ -121,7 +121,7 @@ pub trait PaintScene {
     fn render_text_buffer(
         &mut self,
         buffer: &blitz_text::Buffer,
-        position: kurbo::Point,
+        position: Point,
         color: peniko::Color,
         transform: Affine,
     );

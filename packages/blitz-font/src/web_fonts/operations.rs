@@ -39,19 +39,19 @@ impl WebFontOperations {
             Ok(response) => {
                 match response.bytes().await {
                     Ok(data) => {
-                        let data_arc = Arc::from(data.to_vec().into_boxed_slice());
+                        let data_vec = data.to_vec();
 
                         // Parse font and extract family name
-                        match Self::create_font_key_from_data_sync(&data_arc, &url) {
+                        match Self::create_font_key_from_data_sync(&data_vec, &url) {
                             Ok(font_key) => {
                                 let loaded_entry = WebFontEntry {
                                     url: url.to_string(),
                                     status: FontLoadStatus::Loaded,
-                                    data: Some(Arc::clone(&data_arc)),
+                                    data: Some(data_vec.clone()),
                                     load_start: Instant::now(),
                                     error: None,
                                     content_type: Some("font/woff2".to_string()),
-                                    size: Some(data_arc.len() as u64),
+                                    size: Some(data_vec.len() as u64),
                                     last_accessed: Instant::now(),
                                     access_count: 1,
                                 };

@@ -18,6 +18,7 @@ simd = []
 std = []
 
 [dependencies]
+
 kurbo = "0.12.0"
 peniko = "0.4.1"
 softbuffer = "0.4.6"
