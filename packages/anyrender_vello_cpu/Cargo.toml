@@ -10,8 +10,8 @@ edition = "2024"
 rust-version = "1.85.0"
 
 [features]
-default = [ "external", "std",]
-vendored = [ "dep:bytemuck", "dep:smallvec", "peniko/bytemuck",]
+default = [ "vendored", "std",]
+vendored = [ "dep:vello_cpu_fork", "dep:vello_api", "dep:vello_common", "dep:bytemuck", "dep:smallvec", "peniko/bytemuck",]
 external = [ "dep:vello_cpu",]
 png = [ "dep:png",]
 simd = []
@@ -30,6 +30,19 @@ path = "../blitz-text"
 
 [dependencies.vello_cpu]
 version = "0.0.1"
+optional = true
+
+[dependencies.vello_cpu_fork]
+git = "https://github.com/cyrup-ai/vello_cpu"
+optional = true
+package = "vello_cpu"
+
+[dependencies.vello_api]
+git = "https://github.com/cyrup-ai/vello_api"
+optional = true
+
+[dependencies.vello_common]
+git = "https://github.com/cyrup-ai/vello_common"
 optional = true
 
 [dependencies.bytemuck]
