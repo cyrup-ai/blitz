@@ -45,7 +45,7 @@ dioxus-devtools = { git = "https://github.com/cyrup-ai/dioxus", branch = "main",
 # Windowing & Input
 winit = "0.30.12"
 keyboard-types = "0.8.1"
-wgpu = { git = "https://github.com/cyrup-ai/wgpu", branch = "main", optional = true }
+wgpu = { git = "https://github.com/cyrup-ai/wgpu", branch = "main", package = "wgpu", optional = true }
 
 # IO & Networking
 tokio = { version = "1.47.1", features = ["rt-multi-thread"], optional = true }

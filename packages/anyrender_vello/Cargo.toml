@@ -37,3 +37,4 @@ branch = "main"
 [dependencies.wgpu]
 git = "https://github.com/cyrup-ai/wgpu"
 branch = "main"
+package = "wgpu"

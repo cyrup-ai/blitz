@@ -9,7 +9,7 @@ license = "MIT OR Apache-2.0"
 kurbo = "0.11.3"
 winit = "0.30.12"
 peniko = "0.4.0"
-wgpu = { path = "../../../wgpu/wgpu" }
+wgpu = { git = "https://github.com/cyrup-ai/wgpu", branch = "main", package = "wgpu" }
 anyrender = { path = "../../packages/anyrender" }
 anyrender_vello = { path = "../../packages/anyrender_vello" }
 anyrender_vello_cpu = { path = "../../packages/anyrender_vello_cpu" }

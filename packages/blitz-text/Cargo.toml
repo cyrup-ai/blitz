@@ -8,7 +8,7 @@ description = "Advanced text shaping and layout engine for Blitz"
 [dependencies]
 glyphon = { git = "https://github.com/cyrup-ai/glyphon", branch = "main" }
 cosmyc-text = { git = "https://github.com/cyrup-ai/cosmyc-text", branch = "main" }
-wgpu = { git = "https://github.com/cyrup-ai/wgpu", branch = "main" }
+wgpu = { git = "https://github.com/cyrup-ai/wgpu", branch = "main", package = "wgpu" }
 unicode-bidi = "0.3"
 unicode-script = "0.5"
 unicode-linebreak = "0.1"

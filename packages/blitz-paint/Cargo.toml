@@ -79,6 +79,7 @@ optional = true
 [dependencies.wgpu]
 git = "https://github.com/cyrup-ai/wgpu"
 branch = "main"
+package = "wgpu"
 
 [dependencies.tokio]
 version = "1.47.1"
