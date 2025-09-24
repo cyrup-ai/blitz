@@ -284,7 +284,7 @@ version = "0.4.1"
 dependencies = [
  "anyrender",
  "image",
- "kurbo 0.12.0",
+ "kurbo",
  "peniko",
  "thiserror 2.0.16",
  "usvg",
@@ -317,7 +317,7 @@ dependencies = [
  "anyrender",
  "blitz-text 0.1.0",
  "bytemuck",
- "kurbo 0.12.0",
+ "kurbo",
  "peniko",
  "png 0.18.0",
  "smallvec 2.0.0-alpha.11",
@@ -827,6 +827,7 @@ dependencies = [
  "blitz-dom",
  "blitz-traits",
  "html5ever",
+ "markup5ever 0.35.0 (git+https://github.com/cyrup-ai/html5ever?branch=main)",
 ]
 
 [[package]]
@@ -855,7 +856,7 @@ dependencies = [
  "flume",
  "glyphon 0.9.0 (git+https://github.com/cyrup-ai/glyphon?branch=main)",
  "image",
- "kurbo 0.12.0",
+ "kurbo",
  "libc 1.0.0-alpha.1",
  "libwebp-sys",
  "mockall",
@@ -941,7 +942,7 @@ dependencies = [
 [[package]]
 name = "blitz-text"
 version = "0.1.0"
-source = "git+https://github.com/cyrup-ai/blitz?branch=main#41b294bdc60f8311b9fc01aeb49626807ac6f12c"
+source = "git+https://github.com/cyrup-ai/blitz?branch=main#1c76b4d3a066a0a1a3a805f3987b4e811bb66c1d"
 dependencies = [
  "ahash",
  "arc-swap",
@@ -3439,17 +3440,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "kurbo"
-version = "0.12.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ce9729cc38c18d86123ab736fd2e7151763ba226ac2490ec092d1dd148825e32"
-dependencies = [
- "arrayvec",
- "euclid",
- "smallvec 1.15.1",
-]
-
-[[package]]
 name = "lazy-js-bundle"
 version = "0.7.0-alpha.2"
 source = "git+https://github.com/cyrup-ai/dioxus?branch=main#1602dbb5ffa9eae12830f66ee6eb90ff41b3c38c"
@@ -4487,7 +4477,7 @@ checksum = "9b44f9ddd2f480176b34278eb653ec1c8062f3b143a4e16eeff5ffac3334e288"
 dependencies = [
  "bytemuck",
  "color",
- "kurbo 0.11.3",
+ "kurbo",
  "linebender_resource_handle",
  "smallvec 1.15.1",
 ]
@@ -5908,7 +5898,7 @@ version = "0.15.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "68c7541fff44b35860c1a7a47a7cadf3e4a304c457b58f9870d9706ece028afc"
 dependencies = [
- "kurbo 0.11.3",
+ "kurbo",
  "siphasher",
 ]
 
@@ -6652,7 +6642,7 @@ dependencies = [
  "flate2",
  "fontdb",
  "imagesize",
- "kurbo 0.11.3",
+ "kurbo",
  "log",
  "pico-args",
  "roxmltree",

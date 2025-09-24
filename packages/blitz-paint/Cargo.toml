@@ -26,7 +26,7 @@ taffy = "0.9.1"
 color = "0.3.2"
 palette = "0.7.6"
 peniko = "0.4.1"
-kurbo = "0.12.0"
+kurbo = "0.11.3"
 # Glyphon text rendering dependencies
 glyphon = { git = "https://github.com/cyrup-ai/glyphon", branch = "main" }
 flume = "0.11.1"

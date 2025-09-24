@@ -5,6 +5,7 @@ use std::cell::{Cell, Ref, RefCell, RefMut};
 
 use blitz_dom::node::Attribute;
 use blitz_dom::{BaseDocument, DocumentMutator};
+use markup5ever::QualName as BlitzQualName;
 use html5ever::ParseOpts;
 use html5ever::tokenizer::TokenizerOpts;
 use html5ever::tree_builder::TreeBuilderOpts;
@@ -14,11 +15,31 @@ use html5ever::{
     tree_builder::{ElementFlags, NodeOrText, QuirksMode, TreeSink},
 };
 
+/// Convert html5ever QualName to blitz-dom QualName
+/// Both types have the same structure but come from different markup5ever builds
+fn convert_qualname(html5ever_name: html5ever::QualName) -> BlitzQualName {
+    BlitzQualName {
+        prefix: html5ever_name.prefix,
+        ns: html5ever_name.ns,
+        local: html5ever_name.local,
+    }
+}
+
+/// Convert blitz-dom QualName back to html5ever QualName
+/// Both types have the same structure but come from different markup5ever builds
+fn convert_qualname_back(blitz_name: &BlitzQualName) -> html5ever::QualName {
+    html5ever::QualName {
+        prefix: blitz_name.prefix.clone(),
+        ns: blitz_name.ns.clone(),
+        local: blitz_name.local.clone(),
+    }
+}
+
 /// Convert an html5ever Attribute which uses tendril for its value to a blitz Attribute
 /// which uses String.
 fn html5ever_to_blitz_attr(attr: html5ever::Attribute) -> Attribute {
     Attribute {
-        name: attr.name,
+        name: convert_qualname(attr.name),
         value: attr.value.to_string(),
     }
 }
@@ -32,6 +53,9 @@ pub struct DocumentHtmlParser<'doc> {
     /// The document's quirks mode.
     pub quirks_mode: Cell<QuirksMode>,
     pub is_xml: bool,
+    
+    /// Cache for converted QualNames in elem_name calls
+    elem_name_cache: RefCell<Option<html5ever::QualName>>,
 }
 
 impl<'doc> DocumentHtmlParser<'doc> {
@@ -49,6 +73,7 @@ impl DocumentHtmlParser<'_> {
             errors: RefCell::new(Vec::new()),
             quirks_mode: Cell::new(QuirksMode::NoQuirks),
             is_xml: false,
+            elem_name_cache: RefCell::new(None),
         }
     }
 
@@ -118,9 +143,19 @@ impl<'b> TreeSink for DocumentHtmlParser<'b> {
     }
 
     fn elem_name<'a>(&'a self, target: &'a Self::Handle) -> Self::ElemName<'a> {
-        Ref::map(self.document_mutator.borrow(), |docm| {
-            docm.element_name(*target)
-                .expect("TreeSink::elem_name called on a node which is not an element!")
+        // Get the blitz-dom QualName and clone it to avoid borrowing issues
+        let blitz_qualname = self.document_mutator.borrow()
+            .element_name(*target)
+            .expect("TreeSink::elem_name called on a node which is not an element!")
+            .clone();
+        
+        let html5ever_qualname = convert_qualname_back(&blitz_qualname);
+        
+        // Store in cache and return reference
+        *self.elem_name_cache.borrow_mut() = Some(html5ever_qualname);
+        
+        Ref::map(self.elem_name_cache.borrow(), |cache| {
+            cache.as_ref().unwrap()
         })
     }
 
@@ -131,7 +166,7 @@ impl<'b> TreeSink for DocumentHtmlParser<'b> {
         _flags: ElementFlags,
     ) -> Self::Handle {
         let attrs = attrs.into_iter().map(html5ever_to_blitz_attr).collect();
-        self.mutr().create_element(name, attrs)
+        self.mutr().create_element(convert_qualname(name), attrs)
     }
 
     fn create_comment(&self, _text: StrTendril) -> Self::Handle {

@@ -15,3 +15,4 @@ rust-version = "1.85.0"
 blitz-dom = { path = "../blitz-dom" }
 blitz-traits = { path = "../blitz-traits" }
 html5ever = { git = "https://github.com/cyrup-ai/html5ever", branch = "main" }
+markup5ever = { git = "https://github.com/cyrup-ai/html5ever", branch = "main" }
