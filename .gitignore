@@ -266,17 +266,15 @@ release/
 # Chrome data directories
 chrome_data*/
 
-# Assets and large files
+# Assets and large files (excluding essential assets needed for compilation)
 *.fig
 *.gif
 *.mp4
-*.png
 *.svg
 *.ico
 *.icns
 *.jpg
-assets/
-*/assets/
+# Note: PNG files and assets/ directories are now allowed for compilation assets
 tokenizer_files/
 
 # Temporary and Cache directories
