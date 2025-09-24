@@ -26,3 +26,4 @@ repository = "https://github.com/cyrup-ai/blitz"
 selectors = { git = "https://github.com/cyrup-ai/stylo", branch = "main" }
 markup5ever = { git = "https://github.com/cyrup-ai/html5ever", branch = "main" }
 web_atoms = { git = "https://github.com/cyrup-ai/html5ever", branch = "main" }
+html5ever = { git = "https://github.com/cyrup-ai/html5ever", branch = "main" }
