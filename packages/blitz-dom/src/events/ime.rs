@@ -59,7 +59,7 @@ pub(crate) fn handle_ime_event(doc: &mut BaseDocument, event: BlitzImeEvent) {
                                             + cursor_start.min(composition.preedit_text.len());
                                         editor.set_cursor(Cursor::new(0, final_cursor_pos));
                                     }
-                                    
+
                                     // Ensure text is properly shaped after clearing composition
                                     editor.shape_as_needed(font_system, false);
                                 }
@@ -99,10 +99,10 @@ pub(crate) fn handle_ime_event(doc: &mut BaseDocument, event: BlitzImeEvent) {
                                                 + cursor_end.min(composition.preedit_text.len());
                                             editor.set_cursor(Cursor::new(0, cursor_context_pos));
                                         }
-                                        
+
                                         // Insert committed text
                                         editor.insert_string(&text_clone, None);
-                                        
+
                                         // Ensure text is properly shaped after insertion
                                         editor.shape_as_needed(font_system, false);
                                     }
