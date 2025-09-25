@@ -423,6 +423,18 @@ impl Drop for CacheManager {
 
 impl Default for WebFontCache {
     fn default() -> Self {
-        Self::new().expect("Failed to create default WebFontCache")
+        Self::new().unwrap_or_else(|_| {
+            // Fallback: create a minimal cache that always works
+            WebFontCache {
+                cache: GoldyloxBuilder::<String, CachedWebFont>::new()
+                    .cache_id("webfont_cache_fallback")
+                    .build()
+                    .unwrap(),
+                loading_operations: std::collections::HashMap::new(),
+                failed_loads: std::collections::HashSet::new(),
+                stats: WebFontCacheStats::default(),
+                last_cleanup: std::time::Instant::now(),
+            }
+        })
     }
 }

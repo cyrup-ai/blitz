@@ -85,17 +85,17 @@ impl TextMeasurer {
     }
 
     /// Create a new TextMeasurer with a pre-configured FontSystem
-    pub fn with_font_system(font_system: FontSystem) -> Self {
+    pub fn with_font_system(font_system: FontSystem) -> Result<Self, Box<dyn std::error::Error>> {
         let font_system_arc = Arc::new(ArcSwap::new(Arc::new(font_system)));
-        let cache_manager = UnifiedCacheManager::new().expect("Failed to initialize cache manager");
+        let cache_manager = UnifiedCacheManager::new()?;
         let stats = Arc::new(MeasurementStatsInner::new());
 
-        Self {
+        Ok(Self {
             font_system: font_system_arc,
             cache_manager,
             max_cache_size: 10000,
             stats,
-        }
+        })
     }
 
     /// Measure text dimensions and character positions

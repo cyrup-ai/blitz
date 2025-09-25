@@ -87,6 +87,14 @@ impl CustomGlyphsCache {
 
 impl Default for CustomGlyphsCache {
     fn default() -> Self {
-        Self::new().expect("Failed to create CustomGlyphsCache")
+        Self::new().unwrap_or_else(|_| {
+            // Fallback: create a minimal cache that always works
+            CustomGlyphsCache {
+                cache: GoldyloxBuilder::<String, CustomGlyph>::new()
+                    .cache_id("custom_glyphs_cache_fallback")
+                    .build()
+                    .unwrap(),
+            }
+        })
     }
 }

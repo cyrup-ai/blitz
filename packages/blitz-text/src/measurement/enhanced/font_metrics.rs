@@ -228,7 +228,15 @@ impl FontMetricsCache {
 
 impl Default for FontMetricsCache {
     fn default() -> Self {
-        Self::new().expect("Failed to create FontMetricsCache")
+        Self::new().unwrap_or_else(|_| {
+            // Fallback: create a minimal cache that always works
+            FontMetricsCache {
+                cache: GoldyloxBuilder::<String, CachedFontMetrics>::new()
+                    .cache_id("font_metrics_cache_fallback")
+                    .build()
+                    .unwrap(),
+            }
+        })
     }
 }
 

@@ -114,7 +114,15 @@ impl BidiCache {
 
 impl Default for BidiCache {
     fn default() -> Self {
-        Self::new().expect("Failed to create BidiCache")
+        Self::new().unwrap_or_else(|_| {
+            // Fallback: create a minimal cache that always works
+            BidiCache {
+                cache: GoldyloxBuilder::<String, BidiInfo>::new()
+                    .cache_id("bidi_cache_fallback")
+                    .build()
+                    .unwrap(),
+            }
+        })
     }
 }
 

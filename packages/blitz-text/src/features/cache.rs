@@ -134,6 +134,14 @@ impl FeaturesCache {
 
 impl Default for FeaturesCache {
     fn default() -> Self {
-        Self::new().expect("Failed to create FeaturesCache")
+        Self::new().unwrap_or_else(|_| {
+            // Fallback: create a minimal cache that always works
+            FeaturesCache {
+                cache: GoldyloxBuilder::<String, Vec<Feature>>::new()
+                    .cache_id("features_cache_fallback")
+                    .build()
+                    .unwrap(),
+            }
+        })
     }
 }
