@@ -131,12 +131,16 @@ impl EnhancedGpuCache {
             .cache_id("headless_gpu_cache")
             .build()
             .unwrap_or_else(|_| {
-                // If cache creation fails, create a minimal cache
+                // If cache creation fails, create an ultra-minimal cache
                 GoldyloxBuilder::<String, GpuResource>::new()
-                    .hot_tier_max_entries(10)
-                    .cache_id("minimal_headless_gpu_cache")
+                    .cache_id("ultra_minimal_headless_gpu_cache")
                     .build()
-                    .expect("Failed to create minimal headless GPU cache")
+                    .unwrap_or_else(|_| {
+                        // If even that fails, create the absolute minimal cache
+                        GoldyloxBuilder::<String, GpuResource>::new()
+                            .build()
+                            .expect("Failed to create even the most basic cache - this should never happen")
+                    })
             });
 
         Self {
