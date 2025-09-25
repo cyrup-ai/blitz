@@ -18,8 +18,8 @@ use crate::gpu::GpuRenderConfig;
 
 /// Enhanced TextAtlas with comprehensive performance monitoring and optimization
 pub struct EnhancedTextAtlas {
-    /// Inner glyphon TextAtlas
-    pub(super) inner: TextAtlas,
+    /// Inner glyphon TextAtlas (None in headless mode)
+    pub(super) inner: Option<TextAtlas>,
 
     /// Performance statistics (atomic for thread safety)
     pub(super) cache_hits: AtomicU64,
@@ -49,8 +49,8 @@ pub struct EnhancedTextAtlas {
 impl EnhancedTextAtlas {
     /// Create a headless text atlas for DOM operations without GPU context
     pub fn headless() -> Self {
-        // Use unsafe mem::zeroed for placeholder - will be replaced when GPU context available
-        let inner = unsafe { std::mem::zeroed() };
+        // No GPU context in headless mode
+        let inner = None;
 
         Self {
             inner,
@@ -73,7 +73,7 @@ impl EnhancedTextAtlas {
 
     /// Create a new enhanced text atlas
     pub fn new(device: &Device, queue: &Queue, cache: &Cache, format: TextureFormat) -> Self {
-        let inner = TextAtlas::new(device, queue, cache, format);
+        let inner = Some(TextAtlas::new(device, queue, cache, format));
 
         Self {
             inner,
@@ -102,7 +102,7 @@ impl EnhancedTextAtlas {
         format: TextureFormat,
         color_mode: ColorMode,
     ) -> Self {
-        let inner = TextAtlas::with_color_mode(device, queue, cache, format, color_mode);
+        let inner = Some(TextAtlas::with_color_mode(device, queue, cache, format, color_mode));
 
         let mut atlas = Self::new(device, queue, cache, format);
         atlas.inner = inner;
@@ -124,13 +124,19 @@ impl EnhancedTextAtlas {
 
     /// Trim unused glyphs with enhanced monitoring
     pub fn trim_enhanced(&mut self) {
+        let Some(ref mut inner) = self.inner else {
+            // Headless mode: no-op but track the call
+            self.trim_operations.fetch_add(1, Ordering::Relaxed);
+            return;
+        };
+
         let start_time = Instant::now();
 
         // Get memory usage before trimming
         let memory_before = self.estimated_memory_usage.load(Ordering::Relaxed);
 
         // Call inner trim method
-        self.inner.trim();
+        inner.trim();
 
         // Update statistics
         self.trim_operations.fetch_add(1, Ordering::Relaxed);
@@ -168,12 +174,12 @@ impl EnhancedTextAtlas {
     }
 
     /// Get reference to inner TextAtlas for advanced usage
-    pub fn inner(&self) -> &TextAtlas {
-        &self.inner
+    pub fn inner(&self) -> Option<&TextAtlas> {
+        self.inner.as_ref()
     }
 
     /// Get mutable reference to inner TextAtlas for advanced usage
-    pub fn inner_mut(&mut self) -> &mut TextAtlas {
-        &mut self.inner
+    pub fn inner_mut(&mut self) -> Option<&mut TextAtlas> {
+        self.inner.as_mut()
     }
 }

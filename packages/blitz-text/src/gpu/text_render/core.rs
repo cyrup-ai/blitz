@@ -19,8 +19,8 @@ use crate::gpu::GpuRenderConfig;
 
 /// Enhanced TextRenderer with comprehensive performance monitoring and optimization
 pub struct EnhancedTextRenderer {
-    /// Inner glyphon TextRenderer
-    pub(super) inner: TextRenderer,
+    /// Inner glyphon TextRenderer (None in headless mode)
+    pub(super) inner: Option<TextRenderer>,
 
     /// Performance statistics (atomic for thread safety)
     pub(super) render_passes: AtomicU64,
@@ -50,8 +50,8 @@ pub struct EnhancedTextRenderer {
 impl EnhancedTextRenderer {
     /// Create a headless text renderer for DOM operations without GPU context
     pub fn headless() -> Self {
-        // Use unsafe mem::zeroed for placeholder - will be replaced when GPU context available
-        let inner = unsafe { std::mem::zeroed() };
+        // No GPU context in headless mode
+        let inner = None;
 
         // Create custom glyph registry and cache - lock-free initialization
         let registry = std::sync::Arc::new(CustomGlyphRegistry::new());
@@ -84,7 +84,7 @@ impl EnhancedTextRenderer {
         multisample: MultisampleState,
         depth_stencil: Option<DepthStencilState>,
     ) -> Self {
-        let inner = TextRenderer::new(atlas, device, multisample, depth_stencil);
+        let inner = Some(TextRenderer::new(atlas, device, multisample, depth_stencil));
 
         // Create custom glyph registry and cache - lock-free initialization
         let registry = std::sync::Arc::new(CustomGlyphRegistry::new());
@@ -134,9 +134,14 @@ impl EnhancedTextRenderer {
         text_areas: impl IntoIterator<Item = TextArea<'a>>,
         swash_cache: &mut cosmyc_text::SwashCache,
     ) -> Result<(), PrepareError> {
+        let Some(ref mut inner) = self.inner else {
+            // Headless mode: no-op but track the call
+            return Ok(());
+        };
+
         let start_time = Instant::now();
 
-        let result = self.inner.prepare(
+        let result = inner.prepare(
             device,
             queue,
             font_system,
@@ -161,9 +166,14 @@ impl EnhancedTextRenderer {
         viewport: &Viewport,
         pass: &mut wgpu::RenderPass<'a>,
     ) -> Result<(), RenderError> {
+        let Some(ref inner) = self.inner else {
+            // Headless mode: no-op but track the call
+            return Ok(());
+        };
+
         let start_time = Instant::now();
 
-        let result = self.inner.render(atlas, viewport, pass);
+        let result = inner.render(atlas, viewport, pass);
 
         // Update performance metrics
         let render_time = start_time.elapsed().as_nanos() as u64;
@@ -208,12 +218,12 @@ impl EnhancedTextRenderer {
     }
 
     /// Get reference to inner TextRenderer for advanced usage
-    pub fn inner(&self) -> &TextRenderer {
-        &self.inner
+    pub fn inner(&self) -> Option<&TextRenderer> {
+        self.inner.as_ref()
     }
 
     /// Get mutable reference to inner TextRenderer for advanced usage
-    pub fn inner_mut(&mut self) -> &mut TextRenderer {
-        &mut self.inner
+    pub fn inner_mut(&mut self) -> Option<&mut TextRenderer> {
+        self.inner.as_mut()
     }
 }

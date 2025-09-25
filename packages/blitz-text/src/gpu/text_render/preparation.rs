@@ -43,16 +43,20 @@ impl EnhancedTextRenderer {
         self.total_glyphs_rendered
             .fetch_add(total_glyphs as u64, Ordering::Relaxed);
 
-        // Prepare using inner renderer - convert slice to iterator
-        let result = self.inner.prepare(
-            device,
-            queue,
-            font_system,
-            atlas,
-            viewport,
-            text_areas.iter().cloned(),
-            swash_cache,
-        );
+        // Prepare using inner renderer - convert slice to iterator (skip in headless mode)
+        let result = if let Some(ref mut inner) = self.inner {
+            inner.prepare(
+                device,
+                queue,
+                font_system,
+                atlas,
+                viewport,
+                text_areas.iter().cloned(),
+                swash_cache,
+            )
+        } else {
+            Ok(()) // Headless mode: no-op
+        };
 
         // Track preparation time
         let elapsed = start_time.elapsed();

@@ -19,8 +19,8 @@ use crate::gpu::{GpuRenderConfig, GpuTextResult};
 
 /// Enhanced Viewport with comprehensive performance monitoring and optimization
 pub struct EnhancedViewport {
-    /// Inner glyphon Viewport
-    inner: Viewport,
+    /// Inner glyphon Viewport (None in headless mode)
+    inner: Option<Viewport>,
 
     /// Resolution management
     resolution_manager: Mutex<ResolutionManager>,
@@ -35,8 +35,8 @@ pub struct EnhancedViewport {
 impl EnhancedViewport {
     /// Create a headless viewport for DOM operations without GPU context
     pub fn headless() -> Self {
-        // Use unsafe mem::zeroed for placeholder - will be replaced when GPU context available
-        let inner = unsafe { std::mem::zeroed() };
+        // No GPU context in headless mode
+        let inner = None;
 
         Self {
             inner,
@@ -48,7 +48,7 @@ impl EnhancedViewport {
 
     /// Create a new enhanced viewport
     pub fn new(device: &Device, cache: &Cache) -> Self {
-        let inner = Viewport::new(device, cache);
+        let inner = Some(Viewport::new(device, cache));
 
         Self {
             inner,
@@ -75,8 +75,10 @@ impl EnhancedViewport {
             manager.update_resolution(resolution, update_time)?
         };
 
-        // Call inner update method
-        self.inner.update(queue, resolution);
+        // Call inner update method (skip in headless mode)
+        if let Some(ref mut inner) = self.inner {
+            inner.update(queue, resolution);
+        }
 
         // Record performance metrics
         self.performance_analytics
@@ -87,7 +89,13 @@ impl EnhancedViewport {
 
     /// Get the current resolution
     pub fn resolution(&self) -> Resolution {
-        self.inner.resolution()
+        self.inner
+            .as_ref()
+            .map(|inner| inner.resolution())
+            .unwrap_or_else(|| Resolution {
+                width: 0,
+                height: 0,
+            })
     }
 
     /// Get the current resolution with thread safety
@@ -156,12 +164,12 @@ impl EnhancedViewport {
     }
 
     /// Get reference to inner Viewport for advanced usage
-    pub fn inner(&self) -> &Viewport {
-        &self.inner
+    pub fn inner(&self) -> Option<&Viewport> {
+        self.inner.as_ref()
     }
 
     /// Get mutable reference to inner Viewport for advanced usage
-    pub fn inner_mut(&mut self) -> &mut Viewport {
-        &mut self.inner
+    pub fn inner_mut(&mut self) -> Option<&mut Viewport> {
+        self.inner.as_mut()
     }
 }

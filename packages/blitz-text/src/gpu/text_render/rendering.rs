@@ -25,8 +25,12 @@ impl EnhancedTextRenderer {
         // Increment render pass counter
         self.render_passes.fetch_add(1, Ordering::Relaxed);
 
-        // Perform the actual rendering
-        let result = self.inner.render(atlas, &viewport, pass);
+        // Perform the actual rendering (skip in headless mode)
+        let result = if let Some(ref inner) = self.inner {
+            inner.render(atlas, &viewport, pass)
+        } else {
+            Ok(()) // Headless mode: no-op
+        };
 
         // Track render time
         let elapsed = start_time.elapsed();

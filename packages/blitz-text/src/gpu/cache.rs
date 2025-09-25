@@ -83,17 +83,17 @@ impl CacheValue for GpuResource {
     }
 }
 
-/// Enhanced GPU cache wrapping glyphon::Cache with goldylox for extended functionality  
+/// Enhanced GPU cache wrapping glyphon::Cache with goldylox for extended functionality
 pub struct EnhancedGpuCache {
-    /// Primary glyphon cache for GPU texture operations
-    glyphon_cache: glyphon::Cache,
+    /// Primary glyphon cache for GPU texture operations (None in headless mode)
+    glyphon_cache: Option<glyphon::Cache>,
     /// Secondary goldylox cache for application-level GPU resource caching
     resource_cache: Goldylox<String, GpuResource>,
 }
 
 impl EnhancedGpuCache {
     pub fn new(device: &wgpu::Device) -> Result<Self, Box<dyn std::error::Error>> {
-        let glyphon_cache = glyphon::Cache::new(device);
+        let glyphon_cache = Some(glyphon::Cache::new(device));
 
         let resource_cache = GoldyloxBuilder::<String, GpuResource>::new()
             .hot_tier_max_entries(2000)
@@ -116,9 +116,8 @@ impl EnhancedGpuCache {
     /// This creates placeholder caches that can be used for basic operations
     /// but cannot perform actual GPU caching until initialized with a device later.
     pub fn headless() -> Self {
-        // Create a dummy glyphon cache - we'll need to handle this case in usage
-        // For now, use unsafe mem::zeroed as a placeholder (will be replaced when GPU context is available)
-        let glyphon_cache = unsafe { std::mem::zeroed() };
+        // No GPU context in headless mode
+        let glyphon_cache = None;
 
         // Create a basic goldylox cache without GPU-specific configuration
         let resource_cache = GoldyloxBuilder::<String, GpuResource>::new()
@@ -152,8 +151,8 @@ impl EnhancedGpuCache {
     }
 
     /// Get glyphon cache reference (for GPU components)
-    pub fn glyphon_cache(&self) -> &glyphon::Cache {
-        &self.glyphon_cache
+    pub fn glyphon_cache(&self) -> Option<&glyphon::Cache> {
+        self.glyphon_cache.as_ref()
     }
 
     /// Get GPU resource from resource cache

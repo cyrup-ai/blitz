@@ -102,11 +102,17 @@ impl UnifiedTextSystem {
 
         // Create GPU components
         let gpu_cache = EnhancedGpuCache::new(device)?;
-        let glyphon_cache = gpu_cache.glyphon_cache();
+        let glyphon_cache = gpu_cache.glyphon_cache()
+            .ok_or_else(|| crate::gpu::GpuTextError::DeviceError)?;
 
         let mut text_atlas = EnhancedTextAtlas::new(device, queue, glyphon_cache, format);
-        let text_renderer =
-            EnhancedTextRenderer::new(text_atlas.inner_mut(), device, multisample, depth_stencil);
+        let text_renderer = EnhancedTextRenderer::new(
+            text_atlas.inner_mut()
+                .ok_or_else(|| crate::gpu::GpuTextError::DeviceError)?,
+            device,
+            multisample,
+            depth_stencil
+        );
 
         let viewport = EnhancedViewport::new(device, glyphon_cache);
 
