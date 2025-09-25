@@ -18,7 +18,7 @@ fontconfig = ["dep:fontconfig-sys"]
 winapi = ["dep:winapi"]
 
 [dependencies]
-glyphon = { path = "../../../glyphon" }
+glyphon = { git = "https://github.com/cyrup-ai/glyphon", branch = "main" }
 blitz-text = { path = "../blitz-text" }
 ttf-parser = "0.25.1"
 url = "2.5.7"
@@ -32,7 +32,7 @@ log = "0.4.28"
 goldylox = { git = "https://github.com/cyrup-ai/goldylox", branch = "main" }
 
 # Async web font loading
-reqwest = { path = "../../../reqwest", optional = true, features = ["stream"] }
+reqwest = { git = "https://github.com/cyrup-ai/reqwest", branch = "main", optional = true, features = ["stream"] }
 tokio = { version = "1.47.1", optional = true, features = ["rt", "fs", "macros", "time"] }
 
 # Platform-specific dependencies
