@@ -28,43 +28,52 @@ pub(crate) fn handle_mousemove(
         return changed;
     }
 
-    let node = &mut doc.nodes[target];
-    let Some(el) = node.data.downcast_element_mut() else {
-        return changed;
-    };
-
-    let disabled = el.attr(local_name!("disabled")).is_some();
-    if disabled {
-        return changed;
-    }
-
-    if let SpecialElementData::TextInput(ref mut text_input_data) = el.special_data {
-        if buttons == MouseEventButtons::None {
+    // First, extract the needed layout and attribute data
+    let (content_box_offset, disabled, has_text_input) = {
+        let node = &doc.nodes[target];
+        let Some(el) = node.data.downcast_element() else {
             return changed;
-        }
+        };
 
+        let disabled = el.attr(local_name!("disabled")).is_some();
+        let has_text_input = matches!(el.special_data, SpecialElementData::TextInput(_));
         let content_box_offset = taffy::Point {
             x: node.final_layout.padding.left + node.final_layout.border.left,
             y: node.final_layout.padding.top + node.final_layout.border.top,
         };
 
-        let x = (hit.x - content_box_offset.x) as f64 * doc.viewport.scale_f64();
-        let y = (hit.y - content_box_offset.y) as f64 * doc.viewport.scale_f64();
+        (content_box_offset, disabled, has_text_input)
+    };
 
-        // Use cosmyc-text Action::Drag to extend selection
-        doc.with_text_system(|text_system| {
-            text_system.with_font_system(|font_system| {
+    if disabled || !has_text_input {
+        return changed;
+    }
+
+    if buttons == MouseEventButtons::None {
+        return changed;
+    }
+
+    let x = (hit.x - content_box_offset.x) as f64 * doc.viewport.scale_f64();
+    let y = (hit.y - content_box_offset.y) as f64 * doc.viewport.scale_f64();
+
+    // Use the new API that safely handles both text system and nodes
+    doc.with_text_and_nodes(|text_system, nodes| {
+        text_system.with_font_system(|font_system| {
+            let node = &mut nodes[target];
+            let Some(el) = node.data.downcast_element_mut() else {
+                return;
+            };
+            if let SpecialElementData::TextInput(ref mut text_input_data) = el.special_data {
                 let mut editor_borrowed = text_input_data.editor.borrow_with(font_system);
                 editor_borrowed.action(Action::Drag {
                     x: x as i32,
                     y: y as i32,
                 });
-            });
+            }
         });
+    });
 
-        changed = true;
-    }
-
+    changed = true;
     changed
 }
 
@@ -76,37 +85,48 @@ pub(crate) fn handle_mousedown(doc: &mut BaseDocument, target: usize, x: f32, y:
         return;
     }
 
-    let node = &mut doc.nodes[target];
-    let Some(el) = node.data.downcast_element_mut() else {
-        return;
-    };
+    // First, extract the needed layout and attribute data
+    let (content_box_offset, disabled, has_text_input) = {
+        let node = &doc.nodes[target];
+        let Some(el) = node.data.downcast_element() else {
+            return;
+        };
 
-    let disabled = el.attr(local_name!("disabled")).is_some();
-    if disabled {
-        return;
-    }
-
-    if let SpecialElementData::TextInput(ref mut text_input_data) = el.special_data {
+        let disabled = el.attr(local_name!("disabled")).is_some();
+        let has_text_input = matches!(el.special_data, SpecialElementData::TextInput(_));
         let content_box_offset = taffy::Point {
             x: node.final_layout.padding.left + node.final_layout.border.left,
             y: node.final_layout.padding.top + node.final_layout.border.top,
         };
-        let x = (hit.x - content_box_offset.x) as f64 * doc.viewport.scale_f64();
-        let y = (hit.y - content_box_offset.y) as f64 * doc.viewport.scale_f64();
 
-        // Use cosmyc-text Action::Click to move cursor
-        doc.with_text_system(|text_system| {
-            text_system.with_font_system(|font_system| {
+        (content_box_offset, disabled, has_text_input)
+    };
+
+    if disabled || !has_text_input {
+        return;
+    }
+
+    let x = (hit.x - content_box_offset.x) as f64 * doc.viewport.scale_f64();
+    let y = (hit.y - content_box_offset.y) as f64 * doc.viewport.scale_f64();
+
+    // Use the new API that safely handles both text system and nodes
+    doc.with_text_and_nodes(|text_system, nodes| {
+        text_system.with_font_system(|font_system| {
+            let node = &mut nodes[target];
+            let Some(el) = node.data.downcast_element_mut() else {
+                return;
+            };
+            if let SpecialElementData::TextInput(ref mut text_input_data) = el.special_data {
                 let mut editor_borrowed = text_input_data.editor.borrow_with(font_system);
                 editor_borrowed.action(Action::Click {
                     x: x as i32,
                     y: y as i32,
                 });
-            });
+            }
         });
+    });
 
-        doc.set_focus_to(hit.node_id);
-    }
+    doc.set_focus_to(hit.node_id);
 }
 
 pub(crate) fn handle_mouseup<F: FnMut(DomEvent)>(

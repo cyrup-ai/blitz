@@ -808,59 +808,74 @@ fn collect_complex_layout_children(
 }
 
 fn create_text_editor(doc: &mut BaseDocument, input_element_id: usize, is_multiline: bool) {
-    let node = &mut doc.nodes[input_element_id];
-    let cosmyc_style = node
-        .primary_styles()
-        .as_ref()
-        .map(|s| stylo_to_blitz::style(input_element_id, s))
-        .unwrap_or_else(|| crate::layout::stylo_to_blitz::CosmicStyle::default());
+    // First, extract the needed information without holding borrows
+    let (cosmyc_style, text_content, needs_text_input) = {
+        let node = &doc.nodes[input_element_id];
+        let cosmyc_style = node
+            .primary_styles()
+            .as_ref()
+            .map(|s| stylo_to_blitz::style(input_element_id, s))
+            .unwrap_or_else(|| crate::layout::stylo_to_blitz::CosmicStyle::default());
 
-    let element = match node.data.downcast_element_mut() {
-        Some(element) => element,
-        None => {
-            eprintln!(
-                "Warning: Cannot create text editor for node {}: node is not an element",
-                input_element_id
-            );
-            return;
-        }
+        let element = match node.data.downcast_element() {
+            Some(element) => element,
+            None => {
+                eprintln!(
+                    "Warning: Cannot create text editor for node {}: node is not an element",
+                    input_element_id
+                );
+                return;
+            }
+        };
+
+        let text_content = element.attr(local_name!("value")).unwrap_or(" ").to_string();
+        let needs_text_input = !matches!(element.special_data, SpecialElementData::TextInput(_));
+        
+        (cosmyc_style, text_content, needs_text_input)
     };
 
-    if !matches!(element.special_data, SpecialElementData::TextInput(_)) {
+    if needs_text_input {
+        // Get viewport scale outside the text system closure
+        let viewport_scale = doc.viewport.scale() as f32;
+        
         // Create text input with cosmyc-text using the shared font_system
-        let mut text_input_data = doc.with_text_system(|text_system| 
-            text_system.with_font_system(|font_system| TextInputData::new(font_system, is_multiline))
-        );
+        let text_input_data = doc.with_text_and_nodes(|text_system, _nodes| {
+            text_system.with_font_system(|font_system| {
+                let mut text_input_data = TextInputData::new(font_system, is_multiline);
+                
+                // Set text content with styling inside the same closure
+                text_input_data.editor.with_buffer_mut(|buffer| {
+                    buffer.set_text(
+                        font_system,
+                        &text_content,
+                        &cosmyc_style.attrs.as_attrs(),
+                        blitz_text::Shaping::Advanced,
+                    );
 
-        // Set text content with styling
-        let text_content = element.attr(local_name!("value")).unwrap_or(" ");
-        doc.with_text_system(|text_system| text_system.with_font_system(|font_system| {
-            text_input_data.editor.with_buffer_mut(|buffer| {
-                buffer.set_text(
-                    font_system,
-                    text_content,
-                    &cosmyc_style.attrs.as_attrs(),
-                    blitz_text::Shaping::Advanced,
-                );
+                    // Set buffer properties
+                    buffer.set_wrap(font_system, cosmyc_style.wrap);
+                    buffer.set_metrics(font_system, cosmyc_style.metrics);
 
-                // Set buffer properties
-                buffer.set_wrap(font_system, cosmyc_style.wrap);
-                buffer.set_metrics(font_system, cosmyc_style.metrics);
+                    // Set width if specified (cosmyc-text uses finite dimensions)
+                    buffer.set_size(font_system, Some(300.0 * viewport_scale), Some(f32::INFINITY));
 
-                // Set width if specified (cosmyc-text uses finite dimensions)
-                let scale = doc.viewport.scale() as f32;
-                buffer.set_size(font_system, Some(300.0 * scale), Some(f32::INFINITY));
+                    // Shape the buffer to create layout runs needed for rendering
+                    buffer.shape_until_scroll(font_system, false);
+                });
 
-                // Shape the buffer to create layout runs needed for rendering
-                buffer.shape_until_scroll(font_system, false);
-            });
+                // Shape the editor's buffer - ensures text is properly laid out for rendering
+                // Edit import removed - functionality is inherent to editor
+                text_input_data.editor.shape_as_needed(font_system, true);
+                
+                text_input_data
+            })
+        });
 
-            // Shape the editor's buffer - ensures text is properly laid out for rendering
-            // Edit import removed - functionality is inherent to editor
-            text_input_data.editor.shape_as_needed(font_system, true);
-        }));
-
-        element.special_data = SpecialElementData::TextInput(text_input_data);
+        // Now assign the text input data to the element
+        let node = &mut doc.nodes[input_element_id];
+        if let Some(element) = node.data.downcast_element_mut() {
+            element.special_data = SpecialElementData::TextInput(text_input_data);
+        }
     }
 }
 

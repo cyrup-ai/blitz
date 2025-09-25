@@ -228,14 +228,19 @@ impl DocumentMutator<'_> {
         let attr = &name.local;
 
         if *attr == local_name!("value") {
-            if let Some(input_data) = element.text_input_data_mut() {
-                // Update text input value
-                self.doc.with_text_system(|text_system| text_system.with_font_system(|font_system| {
-                    input_data.set_text(font_system, value);
-                    // Shape the editor after updating text
-                    // Edit import removed - functionality is inherent to editor
-                    input_data.editor.shape_as_needed(font_system, false);
-                }));
+            if element.text_input_data().is_some() {
+                // Update text input value using with_text_and_nodes to avoid borrow conflicts
+                let target_node_id = node_id;
+                let value_clone = value.to_string();
+                self.doc.with_text_and_nodes(|text_system, nodes| {
+                    text_system.with_font_system(|font_system| {
+                        let node = &mut nodes[target_node_id];
+                        if let Some(input_data) = node.element_data_mut().and_then(|el| el.text_input_data_mut()) {
+                            input_data.set_text(font_system, &value_clone);
+                            input_data.editor.shape_as_needed(font_system, false);
+                        }
+                    });
+                });
             }
             return;
         }
@@ -278,20 +283,33 @@ impl DocumentMutator<'_> {
             return;
         }
 
-        // Update text input value
-        if name.local == local_name!("value")
-            && let Some(input_data) = element.text_input_data_mut()
-        {
-            self.doc.with_text_system(|text_system| text_system.with_font_system(|font_system| {
-                input_data.set_text(font_system, "");
-            });
-            // Shape the editor after clearing text
-            self.doc.with_text_system(|text_system| text_system.with_font_system(|font_system| {
-                input_data.editor.shape_as_needed(font_system, false);
+        // Extract element info before text system operations
+        let tag_local = element.name.local.clone();
+        let has_text_input = element.text_input_data().is_some();
+
+        // Drop the element borrow before calling with_text_and_nodes
+        drop(element);
+
+        // Update text input value with separate borrow
+        if name.local == local_name!("value") && has_text_input {
+            self.doc.with_text_and_nodes(|text_system, nodes| {
+                text_system.with_font_system(|font_system| {
+                    let node = &mut nodes[node_id];
+                    if let Some(input_data) = node.element_data_mut().and_then(|el| el.text_input_data_mut()) {
+                        input_data.set_text(font_system, "");
+                        input_data.editor.shape_as_needed(font_system, false);
+                    }
+                });
             });
         }
 
-        let tag = &element.name.local;
+        // Get a fresh element reference for the remaining operations
+        let element = match self.doc.nodes[node_id].element_data_mut() {
+            Some(element) => element,
+            None => return,
+        };
+
+        let tag = &tag_local;
         let attr = &name.local;
         if *attr == local_name!("style") {
             element.flush_style_attribute(&self.doc.guard, &self.doc.url.url_extra_data());
@@ -665,7 +683,7 @@ impl<'doc> DocumentMutator<'doc> {
                 self.recompute_is_animating = true;
                 let canvas_data = SpecialElementData::Canvas(CanvasData {
                     custom_paint_source_id,
-                }));
+                });
                 match node.element_data_mut() {
                     Some(element_data) => {
                         element_data.special_data = canvas_data;

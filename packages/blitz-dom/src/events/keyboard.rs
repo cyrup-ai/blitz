@@ -73,28 +73,40 @@ pub(crate) fn handle_keypress<F: FnMut(DomEvent)>(
             return;
         };
 
-        if let Some(input_data) = element_data.text_input_data_mut() {
+        if element_data.text_input_data().is_some() {
             let event_clone = event.clone();
-            let generated_event = doc.with_text_system(|text_system| {
-                apply_keypress_event(
-                    input_data,
-                    text_system,
-                    &*doc.shell_provider,
-                    event,
-                )
-            }).unwrap_or(None);
-
-            if let Some(generated_event) = generated_event {
+            // Get shell provider reference outside the closure to avoid borrow conflicts
+            let shell_provider_ref = doc.shell_provider.clone();
+            if let Some(generated_event) = doc.with_text_and_nodes(|text_system, nodes| {
+                let node = &mut nodes[node_id];
+                if let Some(input_data) = node.element_data_mut().and_then(|el| el.text_input_data_mut()) {
+                    apply_keypress_event(
+                        input_data,
+                        text_system,
+                        &*shell_provider_ref,
+                        event,
+                    )
+                } else {
+                    None
+                }
+            }) {
                 match generated_event {
                     GeneratedEvent::Input => {
                         // Get text from cosmyc-text Editor by accessing the buffer
-                        let value = input_data.editor.with_buffer(|buffer| {
-                            buffer
-                                .lines
-                                .iter()
-                                .map(|line| line.text())
-                                .collect::<Vec<_>>()
-                                .join("\n")
+                        let value = doc.with_text_and_nodes(|_text_system, nodes| {
+                            let node = &nodes[node_id];
+                            if let Some(input_data) = node.element_data().and_then(|el| el.text_input_data()) {
+                                input_data.editor.with_buffer(|buffer| {
+                                    buffer
+                                        .lines
+                                        .iter()
+                                        .map(|line| line.text())
+                                        .collect::<Vec<_>>()
+                                        .join("\n")
+                                })
+                            } else {
+                                String::new()
+                            }
                         });
                         dispatch_event(DomEvent::new(
                             node_id,
@@ -136,14 +148,14 @@ pub(crate) fn handle_keypress<F: FnMut(DomEvent)>(
                     GeneratedEvent::EscapeRevert => {
                         // HTML Living Standard Escape key behavior:
                         // 1. Revert input value to original state
-                        if let Some(input_data) = doc.nodes[target].element_data_mut()
-                            .and_then(|ed| ed.text_input_data_mut()) {
-                            doc.with_text_system(|text_system| {
-                                text_system.with_font_system(|font_system| {
+                        doc.with_text_and_nodes(|text_system, nodes| {
+                            text_system.with_font_system(|font_system| {
+                                if let Some(input_data) = nodes[target].element_data_mut()
+                                    .and_then(|ed| ed.text_input_data_mut()) {
                                     input_data.revert_to_original_value(font_system);
-                                });
+                                }
                             });
-                        }
+                        });
                         // 2. Remove focus and trigger Blur (no Change event since value is reverted)
                         if doc.focus_node_id == Some(target) {
                             doc.focus_node_id = None;

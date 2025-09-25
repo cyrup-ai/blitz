@@ -233,7 +233,7 @@ pub struct BaseDocument {
 
     // Blitz unified text system (replaces cosmyc-text)
     /// A blitz-text unified system for text processing (initialized when GPU context is available)
-    pub(crate) text_system: Option<blitz_text::UnifiedTextSystem>,
+    pub(crate) text_system: std::cell::RefCell<Option<blitz_text::UnifiedTextSystem>>,
 
     /// The node which is currently hovered (if any)
     pub(crate) hover_node_id: Option<usize>,
@@ -315,7 +315,7 @@ impl BaseDocument {
             .unwrap_or_default();
 
         // text_system will be initialized when GPU context becomes available
-        let text_system = None;
+        let text_system = std::cell::RefCell::new(None);
 
         let net_provider = config
             .net_provider
@@ -458,12 +458,41 @@ impl BaseDocument {
 
     /// Safe access to text system with lazy initialization
     /// Creates a headless text system if none exists - perfect for DOM operations without GPU
-    pub fn with_text_system<R>(&mut self, f: impl FnOnce(&mut blitz_text::UnifiedTextSystem) -> R) -> R {
-        if self.text_system.is_none() {
+    pub fn with_text_system<R>(&self, f: impl FnOnce(&mut blitz_text::UnifiedTextSystem) -> R) -> R {
+        let mut text_system_borrow = self.text_system.borrow_mut();
+        if text_system_borrow.is_none() {
             // Use headless text system for DOM operations - no GPU required
-            self.text_system = Some(blitz_text::UnifiedTextSystem::new_headless().expect("Failed to create headless text system"));
+            *text_system_borrow = Some(blitz_text::UnifiedTextSystem::new_headless().expect("Failed to create headless text system"));
         }
-        f(self.text_system.as_mut().unwrap())
+        f(text_system_borrow.as_mut().unwrap())
+    }
+
+    /// Get a mutable reference to the text system with lazy initialization
+    /// This allows separate borrowing of nodes and text system to avoid borrow checker conflicts
+    pub fn get_text_system(&self) -> std::cell::RefMut<blitz_text::UnifiedTextSystem> {
+        let mut text_system_borrow = self.text_system.borrow_mut();
+        if text_system_borrow.is_none() {
+            // Use headless text system for DOM operations - no GPU required
+            *text_system_borrow = Some(blitz_text::UnifiedTextSystem::new_headless().expect("Failed to create headless text system"));
+        }
+        std::cell::RefMut::map(text_system_borrow, |opt| opt.as_mut().unwrap())
+    }
+
+    /// Safe method to access both text system and nodes without borrow conflicts
+    /// This method ensures proper borrowing order and handles the text system initialization
+    pub fn with_text_and_nodes<R>(&mut self, f: impl FnOnce(&mut blitz_text::UnifiedTextSystem, &mut Box<Slab<Node>>) -> R) -> R {
+        // Initialize text system if needed
+        {
+            let mut text_system_borrow = self.text_system.borrow_mut();
+            if text_system_borrow.is_none() {
+                *text_system_borrow = Some(blitz_text::UnifiedTextSystem::new_headless().expect("Failed to create headless text system"));
+            }
+        }
+        
+        // Now we can safely borrow both - text system through RefCell and nodes directly
+        let mut text_system_borrow = self.text_system.borrow_mut();
+        let text_system = text_system_borrow.as_mut().unwrap();
+        f(text_system, &mut self.nodes)
     }
 
     pub fn mutate<'doc>(&'doc mut self) -> DocumentMutator<'doc> {

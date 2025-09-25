@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use blitz_text::UnifiedTextSystem;
+
 use blitz_traits::{
     navigation::NavigationProvider,
     net::NetProvider,
