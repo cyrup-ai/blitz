@@ -104,9 +104,9 @@ impl BaseDocument {
                     .map(|w| (w * scale) - pbw)
                     .unwrap_or_else(|| {
                         // Get font system for content width calculation
-                        let content_sizes = self.text_system.with_font_system(|font_system| {
+                        let content_sizes = self.with_text_system(|text_system| text_system.with_font_system(|font_system| {
                             inline_layout.calculate_content_widths_with_inline_elements(font_system)
-                        });
+                        }));
                         let computed_width = match available_space.width {
                             AvailableSpace::MinContent => content_sizes.min,
                             AvailableSpace::MaxContent => content_sizes.max,
@@ -139,9 +139,9 @@ impl BaseDocument {
                     });
 
                 // Perform inline layout
-                self.text_system.with_font_system(|font_system| {
+                self.with_text_system(|text_system| text_system.with_font_system(|font_system| {
                     inline_layout.break_all_lines(font_system, Some(width));
-                });
+                }));
 
                 if inputs.run_mode == taffy::RunMode::ComputeSize {
                     return taffy::Size {

@@ -230,12 +230,12 @@ impl DocumentMutator<'_> {
         if *attr == local_name!("value") {
             if let Some(input_data) = element.text_input_data_mut() {
                 // Update text input value
-                self.doc.text_system.with_font_system(|font_system| {
+                self.doc.with_text_system(|text_system| text_system.with_font_system(|font_system| {
                     input_data.set_text(font_system, value);
                     // Shape the editor after updating text
                     // Edit import removed - functionality is inherent to editor
                     input_data.editor.shape_as_needed(font_system, false);
-                });
+                }));
             }
             return;
         }
@@ -282,11 +282,11 @@ impl DocumentMutator<'_> {
         if name.local == local_name!("value")
             && let Some(input_data) = element.text_input_data_mut()
         {
-            self.doc.text_system.with_font_system(|font_system| {
+            self.doc.with_text_system(|text_system| text_system.with_font_system(|font_system| {
                 input_data.set_text(font_system, "");
             });
             // Shape the editor after clearing text
-            self.doc.text_system.with_font_system(|font_system| {
+            self.doc.with_text_system(|text_system| text_system.with_font_system(|font_system| {
                 input_data.editor.shape_as_needed(font_system, false);
             });
         }
@@ -665,7 +665,7 @@ impl<'doc> DocumentMutator<'doc> {
                 self.recompute_is_animating = true;
                 let canvas_data = SpecialElementData::Canvas(CanvasData {
                     custom_paint_source_id,
-                });
+                }));
                 match node.element_data_mut() {
                     Some(element_data) => {
                         element_data.special_data = canvas_data;

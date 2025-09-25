@@ -232,8 +232,8 @@ pub struct BaseDocument {
     pub(crate) snapshots: SnapshotMap,
 
     // Blitz unified text system (replaces cosmyc-text)
-    /// A blitz-text unified system for text processing
-    pub(crate) text_system: blitz_text::UnifiedTextSystem,
+    /// A blitz-text unified system for text processing (initialized when GPU context is available)
+    pub(crate) text_system: Option<blitz_text::UnifiedTextSystem>,
 
     /// The node which is currently hovered (if any)
     pub(crate) hover_node_id: Option<usize>,
@@ -314,10 +314,8 @@ impl BaseDocument {
             .and_then(|url| DocumentUrl::from_str(&url).ok())
             .unwrap_or_default();
 
-        // text_system will be initialized later with GPU context
-        let text_system = config
-            .text_system
-            .unwrap_or_else(|| crate::config::create_dummy_text_system());
+        // text_system will be initialized when GPU context becomes available
+        let text_system = None;
 
         let net_provider = config
             .net_provider
@@ -382,12 +380,7 @@ impl BaseDocument {
         };
         *doc.root_node().stylo_element_data.borrow_mut() = Some(stylo_element_data);
 
-        // Load the built-in bullet font for list styling
-        doc.text_system.with_font_system(|font_system| {
-            use std::sync::Arc;
-            let bullet_font_source = fontdb::Source::Binary(Arc::new(crate::BULLET_FONT.to_vec()));
-            font_system.db_mut().load_font_source(bullet_font_source);
-        });
+        // Bullet font will be loaded when text_system is accessed via with_text_system()
 
         doc
     }
@@ -406,6 +399,8 @@ impl BaseDocument {
     pub fn set_shell_provider(&mut self, shell_provider: Arc<dyn ShellProvider>) {
         self.shell_provider = shell_provider;
     }
+
+    /// Initialize the text system with GPU context
 
     /// Set base url for resolving linked resources (stylesheets, images, fonts, etc)
     pub fn set_base_url(&mut self, url: &str) {
@@ -459,6 +454,16 @@ impl BaseDocument {
             }
         }
         false
+    }
+
+    /// Safe access to text system with lazy initialization
+    /// Creates a headless text system if none exists - perfect for DOM operations without GPU
+    pub fn with_text_system<R>(&mut self, f: impl FnOnce(&mut blitz_text::UnifiedTextSystem) -> R) -> R {
+        if self.text_system.is_none() {
+            // Use headless text system for DOM operations - no GPU required
+            self.text_system = Some(blitz_text::UnifiedTextSystem::new_headless().expect("Failed to create headless text system"));
+        }
+        f(self.text_system.as_mut().unwrap())
     }
 
     pub fn mutate<'doc>(&'doc mut self) -> DocumentMutator<'doc> {
@@ -906,11 +911,11 @@ impl BaseDocument {
             }
             Resource::Font(bytes) => {
                 // Register font with blitz-text UnifiedTextSystem
-                self.text_system.with_font_system(|font_system| {
+                self.with_text_system(|text_system| text_system.with_font_system(|font_system| {
                     use std::sync::Arc;
                     let source = blitz_text::fontdb::Source::Binary(Arc::new(bytes.to_vec()));
                     font_system.db_mut().load_font_source(source);
-                });
+                }));
             }
             Resource::None => {
                 // Do nothing

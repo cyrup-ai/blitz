@@ -47,6 +47,30 @@ pub struct EnhancedTextAtlas {
 }
 
 impl EnhancedTextAtlas {
+    /// Create a headless text atlas for DOM operations without GPU context
+    pub fn headless() -> Self {
+        // Use unsafe mem::zeroed for placeholder - will be replaced when GPU context available
+        let inner = unsafe { std::mem::zeroed() };
+
+        Self {
+            inner,
+            cache_hits: AtomicU64::new(0),
+            cache_misses: AtomicU64::new(0),
+            atlas_growths: AtomicU32::new(0),
+            trim_operations: AtomicU64::new(0),
+            glyph_allocations: AtomicU64::new(0),
+            glyph_deallocations: AtomicU64::new(0),
+            estimated_memory_usage: AtomicUsize::new(0),
+            peak_memory_usage: AtomicUsize::new(0),
+            color_atlas_size: AtomicU32::new(0),
+            mask_atlas_size: AtomicU32::new(0),
+            growth_events: parking_lot::Mutex::new(Vec::new()),
+            config: GpuRenderConfig::default(),
+            last_optimization_time: parking_lot::Mutex::new(Instant::now()),
+            stats_reset_time: Instant::now(),
+        }
+    }
+
     /// Create a new enhanced text atlas
     pub fn new(device: &Device, queue: &Queue, cache: &Cache, format: TextureFormat) -> Self {
         let inner = TextAtlas::new(device, queue, cache, format);

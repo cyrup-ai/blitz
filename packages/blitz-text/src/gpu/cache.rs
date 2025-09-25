@@ -112,6 +112,40 @@ impl EnhancedGpuCache {
         })
     }
 
+    /// Create a headless GPU cache that doesn't require GPU context
+    /// This creates placeholder caches that can be used for basic operations
+    /// but cannot perform actual GPU caching until initialized with a device later.
+    pub fn headless() -> Self {
+        // Create a dummy glyphon cache - we'll need to handle this case in usage
+        // For now, use unsafe mem::zeroed as a placeholder (will be replaced when GPU context is available)
+        let glyphon_cache = unsafe { std::mem::zeroed() };
+
+        // Create a basic goldylox cache without GPU-specific configuration
+        let resource_cache = GoldyloxBuilder::<String, GpuResource>::new()
+            .hot_tier_max_entries(100)
+            .hot_tier_memory_limit_mb(16)
+            .warm_tier_max_entries(400)
+            .warm_tier_max_memory_bytes(32 * 1024 * 1024) // 32MB
+            .cold_tier_max_size_bytes(64 * 1024 * 1024) // 64MB
+            .compression_level(3)
+            .background_worker_threads(1)
+            .cache_id("headless_gpu_cache")
+            .build()
+            .unwrap_or_else(|_| {
+                // If cache creation fails, create a minimal cache
+                GoldyloxBuilder::<String, GpuResource>::new()
+                    .hot_tier_max_entries(10)
+                    .cache_id("minimal_headless_gpu_cache")
+                    .build()
+                    .expect("Failed to create minimal headless GPU cache")
+            });
+
+        Self {
+            glyphon_cache,
+            resource_cache,
+        }
+    }
+
     pub fn init(&mut self, _max_entries: usize) -> Result<(), Box<dyn std::error::Error>> {
         // Configuration is handled in constructor with goldylox
         Ok(())

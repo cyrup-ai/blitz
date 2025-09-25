@@ -102,9 +102,9 @@ fn measure_text_content_intrinsic_size(
     if let Some(element) = node.data.downcast_element() {
         if let Some(mut inline_layout) = element.inline_layout_data.clone() {
             // Use new method that includes inline elements for correct CSS compliance
-            let content_sizes = tree.text_system.with_font_system(|font_system| {
+            let content_sizes = tree.with_text_system(|text_system| text_system.with_font_system(|font_system| {
                 inline_layout.calculate_content_widths_with_inline_elements(font_system)
-            });
+            }));
 
             // Apply Taffy's AvailableSpace pattern for intrinsic sizing
             let width = match inputs.available_space.width {

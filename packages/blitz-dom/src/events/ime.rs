@@ -42,9 +42,9 @@ pub(crate) fn handle_ime_event(doc: &mut BaseDocument, event: BlitzImeEvent) {
                                 Cursor::new(0, preedit_end),
                             ));
                             // Action methods need font_system parameter
-                            doc.text_system.with_font_system(|font_system| {
+                            doc.with_text_system(|text_system| text_system.with_font_system(|font_system| {
                                 _editor.action(font_system, Action::Delete);
-                            });
+                            }));
 
                             // Restore cursor position from stored preedit_cursor if available
                             if let Some((cursor_start, _cursor_end)) = composition.preedit_cursor {
@@ -56,7 +56,7 @@ pub(crate) fn handle_ime_event(doc: &mut BaseDocument, event: BlitzImeEvent) {
                     });
 
                     // Ensure text is properly shaped after clearing composition
-                    doc.text_system.with_font_system(|font_system| {
+                    doc.with_text_system(|text_system| text_system.with_font_system(|font_system| {
                         _editor.shape_as_needed(font_system, false);
                     });
 
@@ -76,9 +76,9 @@ pub(crate) fn handle_ime_event(doc: &mut BaseDocument, event: BlitzImeEvent) {
                                 Cursor::new(0, preedit_end),
                             ));
                             // Action methods need font_system parameter
-                            doc.text_system.with_font_system(|font_system| {
+                            doc.with_text_system(|text_system| text_system.with_font_system(|font_system| {
                                 _editor.action(font_system, Action::Delete);
-                            });
+                            }));
 
                             // Use stored preedit_cursor for insertion positioning context
                             if let Some((_cursor_start, cursor_end)) = composition.preedit_cursor {
@@ -95,7 +95,7 @@ pub(crate) fn handle_ime_event(doc: &mut BaseDocument, event: BlitzImeEvent) {
                     _editor.insert_string(&text, None);
 
                     // Ensure text is properly shaped after insertion
-                    doc.text_system.with_font_system(|font_system| {
+                    doc.with_text_system(|text_system| text_system.with_font_system(|font_system| {
                         _editor.shape_as_needed(font_system, false);
                     });
 
@@ -116,9 +116,9 @@ pub(crate) fn handle_ime_event(doc: &mut BaseDocument, event: BlitzImeEvent) {
                                 Cursor::new(0, preedit_end),
                             ));
                             // Action methods need font_system parameter
-                            doc.text_system.with_font_system(|font_system| {
+                            doc.with_text_system(|text_system| text_system.with_font_system(|font_system| {
                                 _editor.action(font_system, Action::Delete);
-                            });
+                            }));
                         }
 
                         if text.is_empty() {
@@ -163,7 +163,7 @@ pub(crate) fn handle_ime_event(doc: &mut BaseDocument, event: BlitzImeEvent) {
                     });
 
                     // Ensure text is properly shaped after composition changes
-                    doc.text_system.with_font_system(|font_system| {
+                    doc.with_text_system(|text_system| text_system.with_font_system(|font_system| {
                         _editor.shape_as_needed(font_system, false);
                     });
 

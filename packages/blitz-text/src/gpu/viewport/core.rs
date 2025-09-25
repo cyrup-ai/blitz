@@ -33,6 +33,19 @@ pub struct EnhancedViewport {
 }
 
 impl EnhancedViewport {
+    /// Create a headless viewport for DOM operations without GPU context
+    pub fn headless() -> Self {
+        // Use unsafe mem::zeroed for placeholder - will be replaced when GPU context available
+        let inner = unsafe { std::mem::zeroed() };
+
+        Self {
+            inner,
+            resolution_manager: Mutex::new(ResolutionManager::new()),
+            performance_analytics: PerformanceAnalytics::new(),
+            config: GpuRenderConfig::default(),
+        }
+    }
+
     /// Create a new enhanced viewport
     pub fn new(device: &Device, cache: &Cache) -> Self {
         let inner = Viewport::new(device, cache);

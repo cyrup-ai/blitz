@@ -52,11 +52,13 @@ pub(crate) fn handle_mousemove(
         let y = (hit.y - content_box_offset.y) as f64 * doc.viewport.scale_f64();
 
         // Use cosmyc-text Action::Drag to extend selection
-        doc.text_system.with_font_system(|font_system| {
-            let mut editor_borrowed = text_input_data.editor.borrow_with(font_system);
-            editor_borrowed.action(Action::Drag {
-                x: x as i32,
-                y: y as i32,
+        doc.with_text_system(|text_system| {
+            text_system.with_font_system(|font_system| {
+                let mut editor_borrowed = text_input_data.editor.borrow_with(font_system);
+                editor_borrowed.action(Action::Drag {
+                    x: x as i32,
+                    y: y as i32,
+                });
             });
         });
 
@@ -93,11 +95,13 @@ pub(crate) fn handle_mousedown(doc: &mut BaseDocument, target: usize, x: f32, y:
         let y = (hit.y - content_box_offset.y) as f64 * doc.viewport.scale_f64();
 
         // Use cosmyc-text Action::Click to move cursor
-        doc.text_system.with_font_system(|font_system| {
-            let mut editor_borrowed = text_input_data.editor.borrow_with(font_system);
-            editor_borrowed.action(Action::Click {
-                x: x as i32,
-                y: y as i32,
+        doc.with_text_system(|text_system| {
+            text_system.with_font_system(|font_system| {
+                let mut editor_borrowed = text_input_data.editor.borrow_with(font_system);
+                editor_borrowed.action(Action::Click {
+                    x: x as i32,
+                    y: y as i32,
+                });
             });
         });
 

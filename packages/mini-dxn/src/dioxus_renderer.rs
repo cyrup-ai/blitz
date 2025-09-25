@@ -70,6 +70,10 @@ impl DxnWindowRenderer {
     pub fn unregister_custom_paint_source(&self, id: u64) {
         self.inner.borrow_mut().unregister_custom_paint_source(id)
     }
+
+    // Text system initialization is now handled automatically by BaseDocument.with_text_system()
+    // No explicit initialization needed - the document will create a headless text system
+    // when needed and upgrade to GPU-accelerated when GPU context becomes available
 }
 
 impl WindowRenderer for DxnWindowRenderer {

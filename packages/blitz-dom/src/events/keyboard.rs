@@ -75,12 +75,14 @@ pub(crate) fn handle_keypress<F: FnMut(DomEvent)>(
 
         if let Some(input_data) = element_data.text_input_data_mut() {
             let event_clone = event.clone();
-            let generated_event = apply_keypress_event(
-                input_data,
-                &mut doc.text_system,
-                &*doc.shell_provider,
-                event,
-            );
+            let generated_event = doc.with_text_system(|text_system| {
+                apply_keypress_event(
+                    input_data,
+                    text_system,
+                    &*doc.shell_provider,
+                    event,
+                )
+            }).unwrap_or(None);
 
             if let Some(generated_event) = generated_event {
                 match generated_event {
@@ -136,8 +138,10 @@ pub(crate) fn handle_keypress<F: FnMut(DomEvent)>(
                         // 1. Revert input value to original state
                         if let Some(input_data) = doc.nodes[target].element_data_mut()
                             .and_then(|ed| ed.text_input_data_mut()) {
-                            doc.text_system.with_font_system(|font_system| {
-                                input_data.revert_to_original_value(font_system);
+                            doc.with_text_system(|text_system| {
+                                text_system.with_font_system(|font_system| {
+                                    input_data.revert_to_original_value(font_system);
+                                });
                             });
                         }
                         // 2. Remove focus and trigger Blur (no Change event since value is reverted)

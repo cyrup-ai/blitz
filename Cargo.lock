@@ -299,7 +299,7 @@ dependencies = [
  "etagere",
  "flume",
  "futures-intrusive",
- "glyphon 0.9.0 (git+https://github.com/cyrup-ai/glyphon?branch=main)",
+ "glyphon",
  "log",
  "peniko",
  "pollster",
@@ -804,10 +804,10 @@ dependencies = [
  "dirs",
  "env_logger",
  "fontconfig-sys",
- "glyphon 0.9.0",
+ "glyphon",
  "goldylox",
  "log",
- "reqwest 0.12.22",
+ "reqwest",
  "serde",
  "serde_json",
  "tempfile",
@@ -836,7 +836,7 @@ version = "0.1.0-alpha.5"
 dependencies = [
  "blitz-traits",
  "data-url",
- "reqwest 0.12.22 (git+https://github.com/cyrup-ai/reqwest?branch=main)",
+ "reqwest",
  "tokio",
 ]
 
@@ -854,7 +854,7 @@ dependencies = [
  "euclid",
  "fastrand",
  "flume",
- "glyphon 0.9.0 (git+https://github.com/cyrup-ai/glyphon?branch=main)",
+ "glyphon",
  "image",
  "kurbo",
  "libc 1.0.0-alpha.1",
@@ -914,7 +914,7 @@ dependencies = [
  "crossbeam-skiplist",
  "crossbeam-utils",
  "dashmap",
- "glyphon 0.9.0 (git+https://github.com/cyrup-ai/glyphon?branch=main)",
+ "glyphon",
  "goldylox",
  "heapless",
  "image",
@@ -955,7 +955,7 @@ dependencies = [
  "crossbeam-skiplist",
  "crossbeam-utils",
  "dashmap",
- "glyphon 0.9.0 (git+https://github.com/cyrup-ai/glyphon?branch=main)",
+ "glyphon",
  "goldylox",
  "heapless",
  "image",
@@ -2648,18 +2648,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2c4ee00b289aba7a9e5306d57c2d05499b2e5dc427f84ac708bd2c090212cf3e"
 dependencies = [
  "gl_generator",
-]
-
-[[package]]
-name = "glyphon"
-version = "0.9.0"
-dependencies = [
- "cosmyc-text",
- "etagere",
- "lru",
- "rustc-hash",
- "unicode-width",
- "wgpu",
 ]
 
 [[package]]
@@ -5055,9 +5043,12 @@ checksum = "19b30a45b0cd0bcca8037f3d0dc3421eaf95327a17cad11964fb8179b4fc4832"
 [[package]]
 name = "reqwest"
 version = "0.12.22"
+source = "git+https://github.com/cyrup-ai/reqwest?branch=main#271c97d4baba4ab4b32a2f7f28e5b25bb93d620f"
 dependencies = [
  "base64",
  "bytes",
+ "cookie",
+ "cookie_store",
  "encoding_rs",
  "futures-core",
  "futures-util",
@@ -5090,47 +5081,6 @@ dependencies = [
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "wasm-streams",
- "web-sys",
-]
-
-[[package]]
-name = "reqwest"
-version = "0.12.22"
-source = "git+https://github.com/cyrup-ai/reqwest?branch=main#271c97d4baba4ab4b32a2f7f28e5b25bb93d620f"
-dependencies = [
- "base64",
- "bytes",
- "cookie",
- "cookie_store",
- "encoding_rs",
- "futures-core",
- "h2",
- "http",
- "http-body",
- "http-body-util",
- "hyper",
- "hyper-rustls",
- "hyper-tls",
- "hyper-util",
- "js-sys",
- "log",
- "mime",
- "native-tls",
- "percent-encoding",
- "pin-project-lite",
- "rustls-pki-types",
- "serde",
- "serde_json",
- "serde_urlencoded",
- "sync_wrapper",
- "tokio",
- "tokio-native-tls",
- "tower",
- "tower-http",
- "tower-service",
- "url",
- "wasm-bindgen",
- "wasm-bindgen-futures",
  "web-sys",
 ]
 
@@ -6713,7 +6663,7 @@ dependencies = [
  "bytemuck",
  "cosmyc-text",
  "futures-intrusive",
- "glyphon 0.9.0 (git+https://github.com/cyrup-ai/glyphon?branch=main)",
+ "glyphon",
  "log",
  "peniko",
  "png 0.18.0",
@@ -6792,7 +6742,7 @@ dependencies = [
  "blitz-text 0.1.0 (git+https://github.com/cyrup-ai/blitz?branch=main)",
  "bytemuck",
  "dashmap",
- "glyphon 0.9.0 (git+https://github.com/cyrup-ai/glyphon?branch=main)",
+ "glyphon",
  "guillotiere",
  "half",
  "peniko",

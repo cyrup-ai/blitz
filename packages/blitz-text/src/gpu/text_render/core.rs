@@ -48,6 +48,35 @@ pub struct EnhancedTextRenderer {
 }
 
 impl EnhancedTextRenderer {
+    /// Create a headless text renderer for DOM operations without GPU context
+    pub fn headless() -> Self {
+        // Use unsafe mem::zeroed for placeholder - will be replaced when GPU context available
+        let inner = unsafe { std::mem::zeroed() };
+
+        // Create custom glyph registry and cache - lock-free initialization
+        let registry = std::sync::Arc::new(CustomGlyphRegistry::new());
+        let atlas_processor = std::sync::Arc::new(crate::custom_glyphs::atlas::AtlasProcessor);
+        let custom_glyph_cache = arc_swap::ArcSwap::new(std::sync::Arc::new(
+            CustomGlyphCache::new(registry, atlas_processor),
+        ));
+
+        Self {
+            inner,
+            render_passes: AtomicU64::new(0),
+            total_glyphs_rendered: AtomicU64::new(0),
+            text_areas_processed: AtomicU64::new(0),
+            vertex_buffer_reallocations: AtomicU32::new(0),
+            preparation_time_ns: AtomicU64::new(0),
+            render_time_ns: AtomicU64::new(0),
+            current_vertex_buffer_size: AtomicUsize::new(0),
+            peak_vertex_buffer_size: AtomicUsize::new(0),
+            custom_glyph_cache,
+            config: GpuRenderConfig::default(),
+            last_trim_pass: AtomicU64::new(0),
+            stats_reset_time: Instant::now(),
+        }
+    }
+
     /// Create a new enhanced text renderer
     pub fn new(
         atlas: &mut TextAtlas,

@@ -24,8 +24,7 @@ pub struct DocumentConfig {
     pub navigation_provider: Option<Arc<dyn NavigationProvider>>,
     /// Shell provider to redraw requests, clipboard, etc
     pub shell_provider: Option<Arc<dyn ShellProvider>>,
-    /// Blitz unified text system (replaces cosmyc-text FontSystem)
-    pub text_system: Option<UnifiedTextSystem>,
+    // text_system is now managed internally by BaseDocument - no longer in config
 }
 
 #[cfg(test)]
@@ -34,7 +33,6 @@ impl DocumentConfig {
     pub fn for_testing() -> Self {
         Self {
             viewport: Some(blitz_traits::shell::Viewport::default()),
-            text_system: Some(create_test_text_system()),
             shell_provider: Some(std::sync::Arc::new(
                 blitz_traits::shell::DummyShellProvider
             )),
@@ -43,21 +41,4 @@ impl DocumentConfig {
     }
 }
 
-#[cfg(test)]
-fn create_test_text_system() -> blitz_text::UnifiedTextSystem {
-    // Create minimal UnifiedTextSystem stub for testing
-    // SAFETY: This is only used in tests where interface compliance is needed, not functionality
-    // The snapshot tests only require the with_font_system method to work
-    unsafe {
-        std::mem::zeroed()
-    }
-}
-
-/// Create dummy text system for fallback usage (follows dummy provider pattern)
-pub fn create_dummy_text_system() -> blitz_text::UnifiedTextSystem {
-    #[cfg(test)]
-    return create_test_text_system();
-    
-    #[cfg(not(test))]
-    panic!("Critical: text_system is required in DocumentConfig. This is a programming error in the calling code.");
-}
+// create_dummy_text_system and create_test_text_system functions removed entirely - no longer needed

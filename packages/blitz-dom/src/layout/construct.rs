@@ -567,7 +567,7 @@ fn node_list_item_child(
                 Marker::String(str) => str.clone(),
             };
 
-            let buffer = doc.text_system.with_font_system(|font_system| {
+            let buffer = doc.with_text_system(|text_system| text_system.with_font_system(|font_system| {
                 let mut buffer = blitz_text::EnhancedBuffer::new(font_system, cosmyc_style.metrics);
 
                 buffer.set_text_cached(
@@ -590,7 +590,7 @@ fn node_list_item_child(
 
                 buffer.set_size_cached(font_system, Some(layout_width), Some(f32::INFINITY));
                 buffer
-            });
+            }));
 
             ListItemLayoutPosition::Outside(Box::new(buffer))
         }
@@ -828,13 +828,13 @@ fn create_text_editor(doc: &mut BaseDocument, input_element_id: usize, is_multil
 
     if !matches!(element.special_data, SpecialElementData::TextInput(_)) {
         // Create text input with cosmyc-text using the shared font_system
-        let mut text_input_data = doc
-            .text_system
-            .with_font_system(|font_system| TextInputData::new(font_system, is_multiline));
+        let mut text_input_data = doc.with_text_system(|text_system| 
+            text_system.with_font_system(|font_system| TextInputData::new(font_system, is_multiline))
+        );
 
         // Set text content with styling
         let text_content = element.attr(local_name!("value")).unwrap_or(" ");
-        doc.text_system.with_font_system(|font_system| {
+        doc.with_text_system(|text_system| text_system.with_font_system(|font_system| {
             text_input_data.editor.with_buffer_mut(|buffer| {
                 buffer.set_text(
                     font_system,
@@ -858,7 +858,7 @@ fn create_text_editor(doc: &mut BaseDocument, input_element_id: usize, is_multil
             // Shape the editor's buffer - ensures text is properly laid out for rendering
             // Edit import removed - functionality is inherent to editor
             text_input_data.editor.shape_as_needed(font_system, true);
-        });
+        }));
 
         element.special_data = SpecialElementData::TextInput(text_input_data);
     }
@@ -912,11 +912,11 @@ pub(crate) fn build_inline_layout(
     );
 
     // Create cosmyc-text buffer for inline layout
-    let mut buffer = doc.text_system.with_font_system(|font_system| {
+    let mut buffer = doc.with_text_system(|text_system| text_system.with_font_system(|font_system| {
         let mut buffer = blitz_text::EnhancedBuffer::new(font_system, cosmyc_style.metrics);
         buffer.set_wrap_cached(font_system, cosmyc_style.wrap);
         buffer
-    });
+    }));
 
     // Extract white-space-collapse mode from computed styles for CSS compliance
     let collapse_mode = stylo_to_blitz::white_space_collapse_to_mode(
@@ -957,14 +957,14 @@ pub(crate) fn build_inline_layout(
     }
 
     // Set the collected text in the buffer with styling
-    doc.text_system.with_font_system(|font_system| {
+    doc.with_text_system(|text_system| text_system.with_font_system(|font_system| {
         buffer.set_text_cached(
             font_system,
             &text_content,
             &cosmyc_style.attrs.as_attrs(),
             blitz_text::Shaping::Advanced,
         );
-    });
+    }));
 
     // Obtain layout children for the inline layout
     let mut layout_children: Vec<usize> = Vec::new();
