@@ -3,6 +3,8 @@
 use cosmyc_text::fontdb;
 use goldylox::prelude::*;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::sync::Mutex;
 
 use crate::measurement::types::FontMetrics;
 
@@ -87,14 +89,20 @@ impl CacheValue for FontMetrics {
     }
 }
 
-/// Font metrics cache using goldylox
+/// Font metrics cache using goldylox with HashMap fallback
 pub struct FontMetricsCache {
-    cache: Goldylox<FontMetricsCacheKey, FontMetrics>,
+    cache_type: CacheType,
+}
+
+enum CacheType {
+    Goldylox(Goldylox<FontMetricsCacheKey, FontMetrics>),
+    HashMap(Mutex<HashMap<FontMetricsCacheKey, FontMetrics>>),
 }
 
 impl FontMetricsCache {
     pub fn new() -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
-        let cache = GoldyloxBuilder::new()
+        // Try to create Goldylox cache with proper error handling and fallback
+        let cache_type = match GoldyloxBuilder::new()
             .hot_tier_max_entries(200)
             .hot_tier_memory_limit_mb(16)
             .warm_tier_max_entries(800)
@@ -103,14 +111,47 @@ impl FontMetricsCache {
             .compression_level(5)
             .background_worker_threads(1)
             .cache_id("font_metrics_cache")
-            .build()?;
+            .build() {
+                Ok(cache) => {
+                    println!("Successfully initialized Goldylox font metrics cache");
+                    CacheType::Goldylox(cache)
+                },
+                Err(e) => {
+                    eprintln!("Warning: Failed to initialize Goldylox cache: {}. Trying minimal configuration...", e);
+                    // Try a minimal cache configuration that should work on any system
+                    match GoldyloxBuilder::new()
+                        .hot_tier_max_entries(50)
+                        .hot_tier_memory_limit_mb(4)
+                        .cache_id("font_metrics_fallback")
+                        .build() {
+                            Ok(fallback_cache) => {
+                                println!("Successfully initialized minimal Goldylox font metrics cache");
+                                CacheType::Goldylox(fallback_cache)
+                            },
+                            Err(fallback_err) => {
+                                eprintln!("Warning: Both Goldylox cache attempts failed: primary={}, fallback={}. Using HashMap fallback.", e, fallback_err);
+                                // Final fallback: simple HashMap-based cache
+                                CacheType::HashMap(Mutex::new(HashMap::new()))
+                            }
+                        }
+                }
+            };
 
-        Ok(Self { cache })
+        Ok(Self { cache_type })
     }
 
     pub fn get(&self, font_id: fontdb::ID, font_size: f32) -> Option<FontMetrics> {
         let key = FontMetricsCacheKey::new(font_id, font_size);
-        self.cache.get(&key)
+        match &self.cache_type {
+            CacheType::Goldylox(cache) => cache.get(&key),
+            CacheType::HashMap(map) => {
+                if let Ok(map) = map.lock() {
+                    map.get(&key).cloned()
+                } else {
+                    None
+                }
+            }
+        }
     }
 
     pub fn put(
@@ -120,20 +161,63 @@ impl FontMetricsCache {
         metrics: FontMetrics,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let key = FontMetricsCacheKey::new(font_id, font_size);
-        self.cache
-            .put(key, metrics)
-            .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
+        match &self.cache_type {
+            CacheType::Goldylox(cache) => {
+                cache
+                    .put(key, metrics)
+                    .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
+            }
+            CacheType::HashMap(map) => {
+                if let Ok(mut map) = map.lock() {
+                    // Implement simple LRU-like behavior with size limit
+                    if map.len() >= 1000 {
+                        // Remove some entries when cache gets too large
+                        let keys_to_remove: Vec<_> = map.keys().take(200).cloned().collect();
+                        for key_to_remove in keys_to_remove {
+                            map.remove(&key_to_remove);
+                        }
+                    }
+                    map.insert(key, metrics);
+                    Ok(())
+                } else {
+                    Err("Failed to acquire cache lock".into())
+                }
+            }
+        }
     }
 
     pub fn clear(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        self.cache
-            .clear()
-            .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
+        match &self.cache_type {
+            CacheType::Goldylox(cache) => {
+                cache
+                    .clear()
+                    .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
+            }
+            CacheType::HashMap(map) => {
+                if let Ok(mut map) = map.lock() {
+                    map.clear();
+                    Ok(())
+                } else {
+                    Err("Failed to acquire cache lock".into())
+                }
+            }
+        }
     }
 
     pub fn len(&self) -> usize {
-        // Goldylox doesn't expose len() - return 0 as placeholder
-        0
+        match &self.cache_type {
+            CacheType::Goldylox(_) => {
+                // Goldylox doesn't expose len() - return 0 as placeholder
+                0
+            }
+            CacheType::HashMap(map) => {
+                if let Ok(map) = map.lock() {
+                    map.len()
+                } else {
+                    0
+                }
+            }
+        }
     }
 
     pub fn is_empty(&self) -> bool {
