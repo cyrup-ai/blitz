@@ -1,5 +1,8 @@
 //! Enhanced measurement core using goldylox multi-tier caching
 
+use std::collections::HashMap;
+use std::sync::Mutex;
+
 use cosmyc_text::fontdb;
 use goldylox::traits::CacheKey;
 use goldylox::{Goldylox, GoldyloxBuilder};
@@ -72,9 +75,15 @@ impl CacheKey for EnhancedMeasurementKey {
     }
 }
 
-/// Enhanced measurement system using goldylox
+/// Cache type for EnhancedMeasurementCore with fallback support
+enum CacheType {
+    Goldylox(Goldylox<String, TextMeasurement>),
+    HashMap(Mutex<HashMap<String, TextMeasurement>>),
+}
+
+/// Enhanced measurement system using goldylox with HashMap fallback
 pub struct EnhancedMeasurementCore {
-    cache: Goldylox<String, TextMeasurement>,
+    cache_type: CacheType,
 }
 
 impl EnhancedMeasurementCore {
@@ -86,7 +95,8 @@ impl EnhancedMeasurementCore {
 
 impl EnhancedMeasurementCore {
     pub fn new() -> Result<Self, Box<dyn std::error::Error>> {
-        let cache = GoldyloxBuilder::<String, TextMeasurement>::new()
+        // Try to create Goldylox cache with proper error handling and fallback
+        let cache_type = match GoldyloxBuilder::<String, TextMeasurement>::new()
             .hot_tier_max_entries(1000)
             .hot_tier_memory_limit_mb(64)
             .warm_tier_max_entries(4000)
@@ -95,9 +105,33 @@ impl EnhancedMeasurementCore {
             .compression_level(6)
             .background_worker_threads(2)
             .cache_id("enhanced_measurement_core")
-            .build()?;
+            .build() {
+                Ok(cache) => {
+                    println!("Successfully initialized Goldylox enhanced measurement cache");
+                    CacheType::Goldylox(cache)
+                },
+                Err(e) => {
+                    eprintln!("Warning: Failed to initialize Goldylox measurement cache: {}. Trying minimal configuration...", e);
+                    // Try a minimal cache configuration that should work on any system
+                    match GoldyloxBuilder::<String, TextMeasurement>::new()
+                        .hot_tier_max_entries(100)
+                        .hot_tier_memory_limit_mb(8)
+                        .cache_id("measurement_fallback")
+                        .build() {
+                            Ok(fallback_cache) => {
+                                println!("Successfully initialized minimal Goldylox measurement cache");
+                                CacheType::Goldylox(fallback_cache)
+                            },
+                            Err(fallback_err) => {
+                                eprintln!("Warning: Both Goldylox measurement cache attempts failed: primary={}, fallback={}. Using HashMap fallback.", e, fallback_err);
+                                // Final fallback: simple HashMap-based cache
+                                CacheType::HashMap(Mutex::new(HashMap::new()))
+                            }
+                        }
+                }
+            };
 
-        Ok(Self { cache })
+        Ok(Self { cache_type })
     }
 
     pub fn measure_text(
@@ -112,7 +146,8 @@ impl EnhancedMeasurementCore {
         );
         let string_key = Self::key_to_string(&key);
 
-        if let Some(cached) = self.cache.get(&string_key) {
+        // Check cache based on cache type
+        if let Some(cached) = self.get(&string_key) {
             return Ok(cached);
         }
 
@@ -135,11 +170,34 @@ impl EnhancedMeasurementCore {
             measured_at: std::time::Instant::now(),
         };
 
-        if let Err(e) = self.cache.put(string_key, measurement.clone()) {
-            eprintln!("Warning: Failed to cache measurement: {}", e);
-        }
+        // Store in cache
+        self.put(string_key, measurement.clone());
 
         Ok(measurement)
+    }
+
+    fn get(&self, key: &str) -> Option<TextMeasurement> {
+        match &self.cache_type {
+            CacheType::Goldylox(cache) => cache.get(&key.to_string()),
+            CacheType::HashMap(cache) => {
+                cache.lock().ok()?.get(key).cloned()
+            }
+        }
+    }
+
+    fn put(&self, key: String, value: TextMeasurement) {
+        match &self.cache_type {
+            CacheType::Goldylox(cache) => {
+                if let Err(e) = cache.put(key, value) {
+                    eprintln!("Warning: Failed to cache measurement in Goldylox: {}", e);
+                }
+            }
+            CacheType::HashMap(cache) => {
+                if let Ok(mut lock) = cache.lock() {
+                    lock.insert(key, value);
+                }
+            }
+        }
     }
 
     pub fn get_font_metrics(&self, _font_id: fontdb::ID, size: f32) -> Option<FontMetrics> {
@@ -164,9 +222,17 @@ impl EnhancedMeasurementCore {
     }
 
     pub fn clear_cache(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        self.cache
-            .clear()
-            .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)
+        match &self.cache_type {
+            CacheType::Goldylox(cache) => {
+                cache.clear().map_err(|e| Box::new(e) as Box<dyn std::error::Error>)
+            }
+            CacheType::HashMap(cache) => {
+                if let Ok(mut lock) = cache.lock() {
+                    lock.clear();
+                }
+                Ok(())
+            }
+        }
     }
 }
 
