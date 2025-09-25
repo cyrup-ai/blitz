@@ -102,13 +102,11 @@ impl UnifiedTextSystem {
 
         // Create GPU components
         let gpu_cache = EnhancedGpuCache::new(device)?;
-        let glyphon_cache = gpu_cache.glyphon_cache()
-            .ok_or_else(|| crate::gpu::GpuTextError::DeviceError)?;
+        let glyphon_cache = gpu_cache.glyphon_cache();
 
         let mut text_atlas = EnhancedTextAtlas::new(device, queue, glyphon_cache, format);
         let text_renderer = EnhancedTextRenderer::new(
-            text_atlas.inner_mut()
-                .ok_or_else(|| crate::gpu::GpuTextError::DeviceError)?,
+            text_atlas.inner_mut(),
             device,
             multisample,
             depth_stencil
@@ -151,44 +149,7 @@ impl UnifiedTextSystem {
         Ok(system)
     }
 
-    /// Create a headless text system without GPU context for DOM operations
-    /// This creates a minimal text system that supports measurement and font operations
-    /// but cannot perform GPU rendering until initialized with a GPU context later.
-    pub fn new_headless() -> TextSystemResult<Self> {
-        let font_system = ThreadLocal::new();
 
-        // Create measurement components
-        let text_measurer = EnhancedTextMeasurer::new()?;
-
-        // Create cosmyc-text integration
-        let cosmyc_integration = CosmicTextIntegration::new();
-
-        // Create custom glyph system
-        let custom_glyph_system = CustomGlyphSystem::new(GlyphSystemConfig::default());
-
-        // Create performance monitor
-        let performance_monitor = SystemPerformanceMonitor::new();
-
-        // Create placeholder GPU components (will be initialized later when GPU context is available)
-        let text_renderer = EnhancedTextRenderer::headless();
-        let text_atlas = EnhancedTextAtlas::headless();
-        let viewport = EnhancedViewport::headless();
-        let gpu_cache = EnhancedGpuCache::headless();
-
-        Ok(Self {
-            font_system,
-            text_measurer,
-            cosmyc_integration,
-            text_renderer,
-            text_atlas,
-            viewport,
-            gpu_cache,
-            custom_glyph_system,
-            config: UnifiedTextConfig::default(),
-            performance_monitor,
-            stats_start_time: Instant::now(),
-        })
-    }
 
     /// Get reference to thread-local font system (lock-free access)
     /// Each thread gets its own FontSystem instance for zero contention

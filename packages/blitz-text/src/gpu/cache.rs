@@ -85,15 +85,15 @@ impl CacheValue for GpuResource {
 
 /// Enhanced GPU cache wrapping glyphon::Cache with goldylox for extended functionality
 pub struct EnhancedGpuCache {
-    /// Primary glyphon cache for GPU texture operations (None in headless mode)
-    glyphon_cache: Option<glyphon::Cache>,
+    /// Primary glyphon cache for GPU texture operations
+    glyphon_cache: glyphon::Cache,
     /// Secondary goldylox cache for application-level GPU resource caching
     resource_cache: Goldylox<String, GpuResource>,
 }
 
 impl EnhancedGpuCache {
     pub fn new(device: &wgpu::Device) -> Result<Self, Box<dyn std::error::Error>> {
-        let glyphon_cache = Some(glyphon::Cache::new(device));
+        let glyphon_cache = glyphon::Cache::new(device);
 
         let resource_cache = GoldyloxBuilder::<String, GpuResource>::new()
             .hot_tier_max_entries(2000)
@@ -112,59 +112,18 @@ impl EnhancedGpuCache {
         })
     }
 
-    /// Create a headless GPU cache that doesn't require GPU context
-    /// This creates placeholder caches that can be used for basic operations
-    /// but cannot perform actual GPU caching until initialized with a device later.
-    pub fn headless() -> Self {
-        // No GPU context in headless mode
-        let glyphon_cache = None;
 
-        // Create a basic goldylox cache without GPU-specific configuration
-        let resource_cache = GoldyloxBuilder::<String, GpuResource>::new()
-            .hot_tier_max_entries(100)
-            .hot_tier_memory_limit_mb(16)
-            .warm_tier_max_entries(400)
-            .warm_tier_max_memory_bytes(32 * 1024 * 1024) // 32MB
-            .cold_tier_max_size_bytes(64 * 1024 * 1024) // 64MB
-            .compression_level(3)
-            .background_worker_threads(1)
-            .cache_id("headless_gpu_cache")
-            .build()
-            .unwrap_or_else(|_| {
-                // If cache creation fails, create an ultra-minimal cache
-                GoldyloxBuilder::<String, GpuResource>::new()
-                    .cache_id("ultra_minimal_headless_gpu_cache")
-                    .build()
-                    .unwrap_or_else(|_| {
-                        // If even that fails, create the absolute minimal cache
-                        GoldyloxBuilder::<String, GpuResource>::new()
-                            .build()
-                            .expect("Failed to create even the most basic cache - this should never happen")
-                    })
-            });
-
-        Self {
-            glyphon_cache,
-            resource_cache,
-        }
-    }
 
     pub fn init(&mut self, _max_entries: usize) -> Result<(), Box<dyn std::error::Error>> {
         // Configuration is handled in constructor with goldylox
         Ok(())
     }
 
-    /// Initialize GPU cache with device context (for transitioning from headless mode)
-    pub fn init_with_gpu(&mut self, device: &wgpu::Device) -> Result<(), Box<dyn std::error::Error>> {
-        if self.glyphon_cache.is_none() {
-            self.glyphon_cache = Some(glyphon::Cache::new(device));
-        }
-        Ok(())
-    }
+
 
     /// Get glyphon cache reference (for GPU components)
-    pub fn glyphon_cache(&self) -> Option<&glyphon::Cache> {
-        self.glyphon_cache.as_ref()
+    pub fn glyphon_cache(&self) -> &glyphon::Cache {
+        &self.glyphon_cache
     }
 
     /// Get GPU resource from resource cache

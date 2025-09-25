@@ -21,16 +21,12 @@ impl UnifiedTextSystem {
     ) -> TextSystemResult<RenderMetrics> {
         let start_time = Instant::now();
 
-        // Render using GPU components (skip if in headless mode)
-        let _metrics = if let (Some(atlas), Some(viewport)) = (self.text_atlas.inner(), self.viewport.inner()) {
-            self.text_renderer.render_enhanced(
-                atlas,
-                viewport,
-                render_pass,
-            )?
-        } else {
-            // Headless mode: no-op
-        };
+        // Render using GPU components
+        let _metrics = self.text_renderer.render_enhanced(
+            self.text_atlas.inner(),
+            self.viewport.inner(),
+            render_pass,
+        )?;
 
         // Track render performance
         self.performance_monitor

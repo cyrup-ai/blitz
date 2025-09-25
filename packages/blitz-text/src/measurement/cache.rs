@@ -175,14 +175,25 @@ impl CacheManager {
 
 impl Default for CacheManager {
     fn default() -> Self {
-        Self::new().unwrap_or_else(|_| {
-            // Fallback cache with minimal settings if the main one fails
-            let cache = GoldyloxBuilder::<String, TextMeasurement>::new()
-                .hot_tier_max_entries(1000)
-                .build()
-                .expect("Fallback cache creation should not fail");
-            Self { cache }
-        })
+        // Use a single robust goldylox configuration
+        let cache = GoldyloxBuilder::<String, TextMeasurement>::new()
+            .hot_tier_max_entries(2000)
+            .hot_tier_memory_limit_mb(32)
+            .warm_tier_max_entries(8000)
+            .warm_tier_max_memory_bytes(64 * 1024 * 1024) // 64MB
+            .cold_tier_max_size_bytes(128 * 1024 * 1024) // 128MB
+            .compression_level(4)
+            .background_worker_threads(2)
+            .cache_id("measurement_cache_default")
+            .build()
+            .unwrap_or_else(|_| {
+                // Last resort: minimal cache configuration
+                GoldyloxBuilder::<String, TextMeasurement>::new()
+                    .cache_id("measurement_cache_minimal")
+                    .build()
+                    .unwrap()
+            });
+        Self { cache }
     }
 }
 

@@ -75,18 +75,16 @@ impl UnifiedTextSystem {
         };
         self.viewport.update_enhanced(queue, viewport_resolution)?;
 
-        // Prepare for rendering (skip if in headless mode)
-        if let (Some(atlas), Some(viewport)) = (self.text_atlas.inner_mut(), self.viewport.inner()) {
-            self.text_renderer.prepare_enhanced(
-                device,
-                queue,
-                &mut *font_system,
-                atlas,
-                viewport,
-                std::iter::once(text_area),
-                self.cosmyc_integration.swash_cache.inner_mut(),
-            )?;
-        }
+        // Prepare for rendering
+        self.text_renderer.prepare_enhanced(
+            device,
+            queue,
+            &mut *font_system,
+            self.text_atlas.inner_mut(),
+            self.viewport.inner(),
+            std::iter::once(text_area),
+            self.cosmyc_integration.swash_cache.inner_mut(),
+        )?;
 
         // Track preparation performance
         self.performance_monitor

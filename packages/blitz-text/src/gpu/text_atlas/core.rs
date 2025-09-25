@@ -18,8 +18,8 @@ use crate::gpu::GpuRenderConfig;
 
 /// Enhanced TextAtlas with comprehensive performance monitoring and optimization
 pub struct EnhancedTextAtlas {
-    /// Inner glyphon TextAtlas (None in headless mode)
-    pub(super) inner: Option<TextAtlas>,
+    /// Inner glyphon TextAtlas
+    pub(super) inner: TextAtlas,
 
     /// Performance statistics (atomic for thread safety)
     pub(super) cache_hits: AtomicU64,
@@ -47,33 +47,11 @@ pub struct EnhancedTextAtlas {
 }
 
 impl EnhancedTextAtlas {
-    /// Create a headless text atlas for DOM operations without GPU context
-    pub fn headless() -> Self {
-        // No GPU context in headless mode
-        let inner = None;
 
-        Self {
-            inner,
-            cache_hits: AtomicU64::new(0),
-            cache_misses: AtomicU64::new(0),
-            atlas_growths: AtomicU32::new(0),
-            trim_operations: AtomicU64::new(0),
-            glyph_allocations: AtomicU64::new(0),
-            glyph_deallocations: AtomicU64::new(0),
-            estimated_memory_usage: AtomicUsize::new(0),
-            peak_memory_usage: AtomicUsize::new(0),
-            color_atlas_size: AtomicU32::new(0),
-            mask_atlas_size: AtomicU32::new(0),
-            growth_events: parking_lot::Mutex::new(Vec::new()),
-            config: GpuRenderConfig::default(),
-            last_optimization_time: parking_lot::Mutex::new(Instant::now()),
-            stats_reset_time: Instant::now(),
-        }
-    }
 
     /// Create a new enhanced text atlas
     pub fn new(device: &Device, queue: &Queue, cache: &Cache, format: TextureFormat) -> Self {
-        let inner = Some(TextAtlas::new(device, queue, cache, format));
+        let inner = TextAtlas::new(device, queue, cache, format);
 
         Self {
             inner,
@@ -102,7 +80,7 @@ impl EnhancedTextAtlas {
         format: TextureFormat,
         color_mode: ColorMode,
     ) -> Self {
-        let inner = Some(TextAtlas::with_color_mode(device, queue, cache, format, color_mode));
+        let inner = TextAtlas::with_color_mode(device, queue, cache, format, color_mode);
 
         let mut atlas = Self::new(device, queue, cache, format);
         atlas.inner = inner;
@@ -124,19 +102,13 @@ impl EnhancedTextAtlas {
 
     /// Trim unused glyphs with enhanced monitoring
     pub fn trim_enhanced(&mut self) {
-        let Some(ref mut inner) = self.inner else {
-            // Headless mode: no-op but track the call
-            self.trim_operations.fetch_add(1, Ordering::Relaxed);
-            return;
-        };
-
         let start_time = Instant::now();
 
         // Get memory usage before trimming
         let memory_before = self.estimated_memory_usage.load(Ordering::Relaxed);
 
         // Call inner trim method
-        inner.trim();
+        self.inner.trim();
 
         // Update statistics
         self.trim_operations.fetch_add(1, Ordering::Relaxed);
@@ -163,13 +135,7 @@ impl EnhancedTextAtlas {
         }
     }
 
-    /// Initialize text atlas with GPU context (for transitioning from headless mode)
-    pub fn init_with_gpu(&mut self, device: &Device, queue: &Queue, cache: &Cache, format: TextureFormat) -> Result<(), Box<dyn std::error::Error>> {
-        if self.inner.is_none() {
-            self.inner = Some(TextAtlas::new(device, queue, cache, format));
-        }
-        Ok(())
-    }
+
 
     /// Get the current configuration
     pub fn config(&self) -> &GpuRenderConfig {
@@ -182,12 +148,12 @@ impl EnhancedTextAtlas {
     }
 
     /// Get reference to inner TextAtlas for advanced usage
-    pub fn inner(&self) -> Option<&TextAtlas> {
-        self.inner.as_ref()
+    pub fn inner(&self) -> &TextAtlas {
+        &self.inner
     }
 
     /// Get mutable reference to inner TextAtlas for advanced usage
-    pub fn inner_mut(&mut self) -> Option<&mut TextAtlas> {
-        self.inner.as_mut()
+    pub fn inner_mut(&mut self) -> &mut TextAtlas {
+        &mut self.inner
     }
 }

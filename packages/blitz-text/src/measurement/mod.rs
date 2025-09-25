@@ -71,17 +71,17 @@ impl TextMeasurer {
     }
 
     /// Create a new TextMeasurer with specified cache size
-    pub fn with_cache_size(max_cache_size: usize) -> Self {
+    pub fn with_cache_size(max_cache_size: usize) -> Result<Self, Box<dyn std::error::Error>> {
         let font_system = Arc::new(ArcSwap::new(Arc::new(FontSystem::new())));
-        let cache_manager = UnifiedCacheManager::new().expect("Failed to initialize cache manager");
+        let cache_manager = UnifiedCacheManager::new()?;
         let stats = Arc::new(MeasurementStatsInner::new());
 
-        Self {
+        Ok(Self {
             font_system,
             cache_manager,
             max_cache_size,
             stats,
-        }
+        })
     }
 
     /// Create a new TextMeasurer with a pre-configured FontSystem

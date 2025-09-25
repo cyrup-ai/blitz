@@ -19,8 +19,8 @@ use crate::gpu::GpuRenderConfig;
 
 /// Enhanced TextRenderer with comprehensive performance monitoring and optimization
 pub struct EnhancedTextRenderer {
-    /// Inner glyphon TextRenderer (None in headless mode)
-    pub(super) inner: Option<TextRenderer>,
+    /// Inner glyphon TextRenderer
+    pub(super) inner: TextRenderer,
 
     /// Performance statistics (atomic for thread safety)
     pub(super) render_passes: AtomicU64,
@@ -48,34 +48,7 @@ pub struct EnhancedTextRenderer {
 }
 
 impl EnhancedTextRenderer {
-    /// Create a headless text renderer for DOM operations without GPU context
-    pub fn headless() -> Self {
-        // No GPU context in headless mode
-        let inner = None;
 
-        // Create custom glyph registry and cache - lock-free initialization
-        let registry = std::sync::Arc::new(CustomGlyphRegistry::new());
-        let atlas_processor = std::sync::Arc::new(crate::custom_glyphs::atlas::AtlasProcessor);
-        let custom_glyph_cache = arc_swap::ArcSwap::new(std::sync::Arc::new(
-            CustomGlyphCache::new(registry, atlas_processor),
-        ));
-
-        Self {
-            inner,
-            render_passes: AtomicU64::new(0),
-            total_glyphs_rendered: AtomicU64::new(0),
-            text_areas_processed: AtomicU64::new(0),
-            vertex_buffer_reallocations: AtomicU32::new(0),
-            preparation_time_ns: AtomicU64::new(0),
-            render_time_ns: AtomicU64::new(0),
-            current_vertex_buffer_size: AtomicUsize::new(0),
-            peak_vertex_buffer_size: AtomicUsize::new(0),
-            custom_glyph_cache,
-            config: GpuRenderConfig::default(),
-            last_trim_pass: AtomicU64::new(0),
-            stats_reset_time: Instant::now(),
-        }
-    }
 
     /// Create a new enhanced text renderer
     pub fn new(
@@ -84,7 +57,7 @@ impl EnhancedTextRenderer {
         multisample: MultisampleState,
         depth_stencil: Option<DepthStencilState>,
     ) -> Self {
-        let inner = Some(TextRenderer::new(atlas, device, multisample, depth_stencil));
+        let inner = TextRenderer::new(atlas, device, multisample, depth_stencil);
 
         // Create custom glyph registry and cache - lock-free initialization
         let registry = std::sync::Arc::new(CustomGlyphRegistry::new());
@@ -134,14 +107,9 @@ impl EnhancedTextRenderer {
         text_areas: impl IntoIterator<Item = TextArea<'a>>,
         swash_cache: &mut cosmyc_text::SwashCache,
     ) -> Result<(), PrepareError> {
-        let Some(ref mut inner) = self.inner else {
-            // Headless mode: no-op but track the call
-            return Ok(());
-        };
-
         let start_time = Instant::now();
 
-        let result = inner.prepare(
+        let result = self.inner.prepare(
             device,
             queue,
             font_system,
@@ -166,14 +134,9 @@ impl EnhancedTextRenderer {
         viewport: &Viewport,
         pass: &mut wgpu::RenderPass<'a>,
     ) -> Result<(), RenderError> {
-        let Some(ref inner) = self.inner else {
-            // Headless mode: no-op but track the call
-            return Ok(());
-        };
-
         let start_time = Instant::now();
 
-        let result = inner.render(atlas, viewport, pass);
+        let result = self.inner.render(atlas, viewport, pass);
 
         // Update performance metrics
         let render_time = start_time.elapsed().as_nanos() as u64;
@@ -218,12 +181,12 @@ impl EnhancedTextRenderer {
     }
 
     /// Get reference to inner TextRenderer for advanced usage
-    pub fn inner(&self) -> Option<&TextRenderer> {
-        self.inner.as_ref()
+    pub fn inner(&self) -> &TextRenderer {
+        &self.inner
     }
 
     /// Get mutable reference to inner TextRenderer for advanced usage
-    pub fn inner_mut(&mut self) -> Option<&mut TextRenderer> {
-        self.inner.as_mut()
+    pub fn inner_mut(&mut self) -> &mut TextRenderer {
+        &mut self.inner
     }
 }

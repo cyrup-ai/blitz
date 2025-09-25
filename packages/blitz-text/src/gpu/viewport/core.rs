@@ -19,8 +19,8 @@ use crate::gpu::{GpuRenderConfig, GpuTextResult};
 
 /// Enhanced Viewport with comprehensive performance monitoring and optimization
 pub struct EnhancedViewport {
-    /// Inner glyphon Viewport (None in headless mode)
-    inner: Option<Viewport>,
+    /// Inner glyphon Viewport
+    inner: Viewport,
 
     /// Resolution management
     resolution_manager: Mutex<ResolutionManager>,
@@ -33,22 +33,11 @@ pub struct EnhancedViewport {
 }
 
 impl EnhancedViewport {
-    /// Create a headless viewport for DOM operations without GPU context
-    pub fn headless() -> Self {
-        // No GPU context in headless mode
-        let inner = None;
 
-        Self {
-            inner,
-            resolution_manager: Mutex::new(ResolutionManager::new()),
-            performance_analytics: PerformanceAnalytics::new(),
-            config: GpuRenderConfig::default(),
-        }
-    }
 
     /// Create a new enhanced viewport
     pub fn new(device: &Device, cache: &Cache) -> Self {
-        let inner = Some(Viewport::new(device, cache));
+        let inner = Viewport::new(device, cache);
 
         Self {
             inner,
@@ -75,10 +64,8 @@ impl EnhancedViewport {
             manager.update_resolution(resolution, update_time)?
         };
 
-        // Call inner update method (skip in headless mode)
-        if let Some(ref mut inner) = self.inner {
-            inner.update(queue, resolution);
-        }
+        // Call inner update method
+        self.inner.update(queue, resolution);
 
         // Record performance metrics
         self.performance_analytics
@@ -89,13 +76,7 @@ impl EnhancedViewport {
 
     /// Get the current resolution
     pub fn resolution(&self) -> Resolution {
-        self.inner
-            .as_ref()
-            .map(|inner| inner.resolution())
-            .unwrap_or_else(|| Resolution {
-                width: 0,
-                height: 0,
-            })
+        self.inner.resolution()
     }
 
     /// Get the current resolution with thread safety
@@ -153,13 +134,7 @@ impl EnhancedViewport {
         self.resolution_manager.lock().clear_history();
     }
 
-    /// Initialize viewport with GPU context (for transitioning from headless mode)
-    pub fn init_with_gpu(&mut self, device: &Device, cache: &Cache) -> Result<(), Box<dyn std::error::Error>> {
-        if self.inner.is_none() {
-            self.inner = Some(Viewport::new(device, cache));
-        }
-        Ok(())
-    }
+
 
     /// Get the current configuration
     pub fn config(&self) -> &GpuRenderConfig {
@@ -172,12 +147,12 @@ impl EnhancedViewport {
     }
 
     /// Get reference to inner Viewport for advanced usage
-    pub fn inner(&self) -> Option<&Viewport> {
-        self.inner.as_ref()
+    pub fn inner(&self) -> &Viewport {
+        &self.inner
     }
 
     /// Get mutable reference to inner Viewport for advanced usage
-    pub fn inner_mut(&mut self) -> Option<&mut Viewport> {
-        self.inner.as_mut()
+    pub fn inner_mut(&mut self) -> &mut Viewport {
+        &mut self.inner
     }
 }
