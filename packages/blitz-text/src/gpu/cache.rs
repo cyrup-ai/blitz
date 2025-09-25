@@ -150,6 +150,14 @@ impl EnhancedGpuCache {
         Ok(())
     }
 
+    /// Initialize GPU cache with device context (for transitioning from headless mode)
+    pub fn init_with_gpu(&mut self, device: &wgpu::Device) -> Result<(), Box<dyn std::error::Error>> {
+        if self.glyphon_cache.is_none() {
+            self.glyphon_cache = Some(glyphon::Cache::new(device));
+        }
+        Ok(())
+    }
+
     /// Get glyphon cache reference (for GPU components)
     pub fn glyphon_cache(&self) -> Option<&glyphon::Cache> {
         self.glyphon_cache.as_ref()

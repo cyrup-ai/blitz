@@ -163,6 +163,14 @@ impl EnhancedTextAtlas {
         }
     }
 
+    /// Initialize text atlas with GPU context (for transitioning from headless mode)
+    pub fn init_with_gpu(&mut self, device: &Device, queue: &Queue, cache: &Cache, format: TextureFormat) -> Result<(), Box<dyn std::error::Error>> {
+        if self.inner.is_none() {
+            self.inner = Some(TextAtlas::new(device, queue, cache, format));
+        }
+        Ok(())
+    }
+
     /// Get the current configuration
     pub fn config(&self) -> &GpuRenderConfig {
         &self.config

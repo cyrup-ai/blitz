@@ -153,6 +153,14 @@ impl EnhancedViewport {
         self.resolution_manager.lock().clear_history();
     }
 
+    /// Initialize viewport with GPU context (for transitioning from headless mode)
+    pub fn init_with_gpu(&mut self, device: &Device, cache: &Cache) -> Result<(), Box<dyn std::error::Error>> {
+        if self.inner.is_none() {
+            self.inner = Some(Viewport::new(device, cache));
+        }
+        Ok(())
+    }
+
     /// Get the current configuration
     pub fn config(&self) -> &GpuRenderConfig {
         &self.config
