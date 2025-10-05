@@ -17,6 +17,7 @@ pub mod cache;
 pub mod cosmyc;
 pub mod cosmyc_types;
 pub mod custom_glyphs;
+pub mod embedded_fallback;
 pub mod error;
 pub mod features;
 pub mod gpu;
@@ -79,6 +80,9 @@ pub use custom_glyphs::{
     hash_color_key, AtlasCoords, CustomGlyph, CustomGlyphCache, CustomGlyphData, CustomGlyphError,
     CustomGlyphId, CustomGlyphRegistry, CustomGlyphSystem, GlyphKey, GlyphMetrics,
     GlyphSystemConfig, GlyphSystemStats,
+};
+pub use embedded_fallback::{
+    ensure_embedded_fallback, load_embedded_fallback, EMBEDDED_FALLBACK_FAMILY,
 };
 pub use error::ShapingError;
 pub use features::{CustomFeatures, FeatureLookup, FeatureSettings, FeaturesCache};

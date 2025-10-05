@@ -13,18 +13,23 @@ impl ElementCx<'_> {
             return;
         }
 
+        println!("🔲 draw_input called for node {}", self.node.id);
         let type_attr = self.node.attr(local_name!("type"));
+        println!("🔲 Input type: {:?}", type_attr);
 
         // Handle checkbox/radio inputs that need checked state
         if matches!(type_attr, Some("checkbox") | Some("radio")) {
             let Some(checked) = self.element.checkbox_input_checked() else {
+                println!("❌ Checkbox/radio has no checked state");
                 return;
             };
+            println!("🔲 Drawing checkbox/radio with checked={}", checked);
             self.draw_checkbox_radio_input(scene, checked, type_attr);
             return;
         }
 
         // Handle text inputs and other input types
+        println!("🔲 Drawing text input background");
         self.draw_text_input_background(scene, type_attr);
     }
 

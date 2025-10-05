@@ -24,7 +24,7 @@ pub struct EnhancedTextMeasurement {
     pub line_measurements: Vec<LineMeasurement>,
     pub total_character_count: usize,
     pub baseline_offset: f32,
-    pub measured_at: std::time::Instant,
+    pub measured_at: u64, // Unix timestamp in milliseconds
 
     // Enhanced measurements using cosmyc-text APIs
     pub font_metrics: FontMetrics,

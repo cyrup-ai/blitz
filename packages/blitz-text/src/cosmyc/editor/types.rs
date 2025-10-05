@@ -18,6 +18,7 @@ pub struct EnhancedEditor<'buffer> {
     pub(super) undo_stack: Vec<Change>,
     pub(super) redo_stack: Vec<Change>,
     pub(super) max_undo_depth: usize,
+    pub(super) applying_change: bool,
 
     // Performance statistics
     pub(super) total_actions: AtomicUsize,
@@ -41,6 +42,7 @@ impl<'buffer> EnhancedEditor<'buffer> {
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
             max_undo_depth: 100,
+            applying_change: false,
             total_actions: AtomicUsize::new(0),
             insert_operations: AtomicUsize::new(0),
             delete_operations: AtomicUsize::new(0),
@@ -81,68 +83,6 @@ impl<'buffer> EnhancedEditor<'buffer> {
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         self.total_actions
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    }
-
-    /// Delete current selection
-    pub fn delete_selection(&mut self) {
-        match self.selection {
-            Selection::Normal(_cursor) | Selection::Word(_cursor) | Selection::Line(_cursor) => {
-                // For now, just clear the selection
-                // In a full implementation, we would delete the selected text
-                self.selection = Selection::None;
-            }
-            Selection::None => {
-                // Nothing to delete
-            }
-        }
-    }
-
-    /// Insert text at specific position
-    pub fn insert_at(&mut self, position: Cursor, _text: &str) {
-        // For now, just record the operation without creating a Change
-        // In a full implementation, we would create and apply the change
-        self.cursor = position;
-        self.insert_operations
-            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        self.total_actions
-            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    }
-
-    /// Delete text range
-    pub fn delete_range(&mut self, start: Cursor, _end: Cursor) {
-        // For now, just record the operation without creating a Change
-        // In a full implementation, we would create and apply the change
-        self.cursor = start;
-        self.delete_operations
-            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        self.total_actions
-            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    }
-
-    /// Apply change to buffer
-    pub fn apply_change(&mut self, change: Change) {
-        // Store for undo
-        if self.undo_stack.len() >= self.max_undo_depth {
-            self.undo_stack.remove(0);
-        }
-        self.undo_stack.push(change.clone());
-        self.redo_stack.clear();
-
-        // Apply to buffer
-        match &mut self.buffer {
-            BufferRef::Owned(ref mut _buffer) => {
-                // For now, just record the change without applying it
-                // In a full implementation, we would apply the change to the buffer
-            }
-            BufferRef::Borrowed(_) => {
-                // For borrowed buffers, we can't modify directly
-                // Just record the change for now
-            }
-            BufferRef::Arc(_) => {
-                // For Arc buffers, we can't modify directly
-                // Just record the change for now
-            }
-        }
     }
 
     /// Access buffer with mutable reference

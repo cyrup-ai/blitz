@@ -590,7 +590,11 @@ fn node_list_item_child(
 
                 buffer.set_size_cached(font_system, Some(layout_width), Some(f32::INFINITY));
                 buffer
-            }));
+            })).unwrap_or_else(|_| {
+                // Create a minimal buffer if text system is not available
+                // This shouldn't happen in normal operation but provides fallback
+                blitz_text::EnhancedBuffer::new_empty(blitz_text::Metrics::new(16.0, 20.0))
+            });
 
             ListItemLayoutPosition::Outside(Box::new(buffer))
         }
@@ -842,7 +846,7 @@ fn create_text_editor(doc: &mut BaseDocument, input_element_id: usize, is_multil
         let text_input_data = doc.with_text_and_nodes(|text_system, _nodes| {
             text_system.with_font_system(|font_system| {
                 let mut text_input_data = TextInputData::new(font_system, is_multiline);
-                
+
                 // Set text content with styling inside the same closure
                 text_input_data.editor.with_buffer_mut(|buffer| {
                     buffer.set_text(
@@ -866,10 +870,16 @@ fn create_text_editor(doc: &mut BaseDocument, input_element_id: usize, is_multil
                 // Shape the editor's buffer - ensures text is properly laid out for rendering
                 // Edit import removed - functionality is inherent to editor
                 text_input_data.editor.shape_as_needed(font_system, true);
-                
+
                 text_input_data
             })
         });
+
+        // If text system isn't initialized, skip text input creation
+        let text_input_data = match text_input_data {
+            Ok(data) => data,
+            Err(_) => return,
+        };
 
         // Now assign the text input data to the element
         let node = &mut doc.nodes[input_element_id];
@@ -931,7 +941,10 @@ pub(crate) fn build_inline_layout(
         let mut buffer = blitz_text::EnhancedBuffer::new(font_system, cosmyc_style.metrics);
         buffer.set_wrap_cached(font_system, cosmyc_style.wrap);
         buffer
-    }));
+    })).unwrap_or_else(|_| {
+        // Create a default buffer if text system is not available
+        blitz_text::EnhancedBuffer::new_empty(blitz_text::Metrics::new(16.0, 20.0))
+    });
 
     // Extract white-space-collapse mode from computed styles for CSS compliance
     let collapse_mode = stylo_to_blitz::white_space_collapse_to_mode(
@@ -972,7 +985,8 @@ pub(crate) fn build_inline_layout(
     }
 
     // Set the collected text in the buffer with styling
-    doc.with_text_system(|text_system| text_system.with_font_system(|font_system| {
+    println!("🔍 build_inline_layout: Node {} collected text: '{}'", inline_context_root_node_id, text_content);
+    let result = doc.with_text_system(|text_system| text_system.with_font_system(|font_system| {
         buffer.set_text_cached(
             font_system,
             &text_content,
@@ -980,6 +994,7 @@ pub(crate) fn build_inline_layout(
             blitz_text::Shaping::Advanced,
         );
     }));
+    println!("🔍 build_inline_layout: Node {} text_system result: {:?}", inline_context_root_node_id, result);
 
     // Obtain layout children for the inline layout
     let mut layout_children: Vec<usize> = Vec::new();

@@ -16,6 +16,7 @@ pub use error::{TextRenderError, TextRenderResult};
 pub use image_renderer::VelloImageRenderer;
 pub use scene::VelloScenePainter;
 pub use wgpu;
+pub use wgpu_context::DeviceHandle;
 pub use window_renderer::VelloWindowRenderer;
 
 #[cfg(target_os = "macos")]

@@ -89,10 +89,19 @@ async fn main() {
     ));
 
     while !net.is_empty() {
-        let Some((_, res)) = recv.recv().await else {
+        let Some((_, result)) = recv.recv().await else {
             break;
         };
-        document.as_mut().load_resource(res);
+        
+        match result {
+            Ok(res) => {
+                document.as_mut().load_resource(res);
+            }
+            Err(e) => {
+                eprintln!("Failed to load resource: {}", e);
+                // Continue processing other resources
+            }
+        }
     }
 
     timer.time("Fetched assets");

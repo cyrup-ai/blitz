@@ -275,7 +275,8 @@ fn parses_some_html() {
     use blitz_dom::DocumentConfig;
 
     let html = "<!DOCTYPE html><html><body><h1>hello world</h1></body></html>";
-    let mut doc = BaseDocument::new(DocumentConfig::default());
+    let mut doc = BaseDocument::new(DocumentConfig::default())
+        .expect("Failed to create test document");
     let sink = DocumentHtmlParser::new(&mut doc);
 
     html5ever::parse_document(sink, Default::default())

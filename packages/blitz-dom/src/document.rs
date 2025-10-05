@@ -9,12 +9,12 @@ use std::task::Context as TaskContext;
 use app_units::Au;
 // Blitz text system imports for font metrics
 use blitz_text::measurement::enhanced::font_metrics::FontMetricsCalculator;
-use blitz_text::{Family, FontSystem, Stretch, Style as FontStyle, Weight, fontdb};
+use blitz_text::{ensure_embedded_fallback, Family, FontSystem, Stretch, Style as FontStyle, Weight, fontdb};
 use blitz_traits::devtools::DevtoolSettings;
 use blitz_traits::events::{DomEvent, HitResult, UiEvent};
-use blitz_traits::navigation::{DummyNavigationProvider, NavigationProvider};
-use blitz_traits::net::{DummyNetProvider, NetProvider, SharedProvider};
-use blitz_traits::shell::{ColorScheme, DummyShellProvider, ShellProvider, Viewport};
+use blitz_traits::navigation::NavigationProvider;
+use blitz_traits::net::{NetProvider, SharedProvider};
+use blitz_traits::shell::{ColorScheme, ShellProvider, Viewport};
 use cursor_icon::CursorIcon;
 use markup5ever::local_name;
 // Replaced parley with cosmyc-text for text processing
@@ -84,6 +84,14 @@ pub trait Document: Deref<Target = BaseDocument> + DerefMut + 'static {
 }
 
 /// Font metrics provider using blitz-text integration for real font metrics
+///
+/// # Graceful Degradation
+/// - Primary: Uses goldylox-based FontMetricsCalculator for optimal performance
+/// - Fallback: Falls back to HashMap-based caching if goldylox initialization fails
+/// - Last Resort: Loads embedded BlitzFallback font to ensure basic text rendering works
+///
+/// This ensures text measurement always succeeds, even in constrained environments
+/// like headless rendering, missing system fonts, or goldylox cache failures.
 struct BlitzFontMetricsProvider {
     font_metrics_calculator: FontMetricsCalculator,
     font_system: std::sync::Mutex<FontSystem>,
@@ -108,10 +116,19 @@ impl BlitzFontMetricsProvider {
 
 impl Default for BlitzFontMetricsProvider {
     fn default() -> Self {
-        // Try to create normally, fallback to panic with clear error message
-        // In production, this should be handled at a higher level
-        Self::new().unwrap_or_else(|e| {
-            panic!("Critical: Cannot initialize font metrics provider: {:?}. This indicates a fundamental system issue that must be resolved.", e);
+        Self::new().unwrap_or_else(|_| {
+            // Fallback: Use FontMetricsCalculator default which has HashMap fallback
+            // and create a minimal FontSystem with embedded fallback font
+            let font_metrics_calculator = FontMetricsCalculator::default();
+            let mut font_system = FontSystem::new_with_fonts(std::iter::empty());
+            
+            // Ensure embedded fallback font is loaded for basic text rendering
+            let _ = ensure_embedded_fallback(&mut font_system);
+            
+            Self {
+                font_metrics_calculator,
+                font_system: std::sync::Mutex::new(font_system),
+            }
         })
     }
 }
@@ -231,9 +248,7 @@ pub struct BaseDocument {
     /// Stylo invalidation map. We insert into this map prior to mutating nodes.
     pub(crate) snapshots: SnapshotMap,
 
-    // Blitz unified text system (replaces cosmyc-text)
-    /// A blitz-text unified system for text processing (initialized when GPU context is available)
-    pub(crate) text_system: std::cell::RefCell<Option<blitz_text::UnifiedTextSystem>>,
+
 
     /// The node which is currently hovered (if any)
     pub(crate) hover_node_id: Option<usize>,
@@ -290,7 +305,7 @@ pub(crate) fn make_device(viewport: &Viewport) -> Device {
 
 impl BaseDocument {
     /// Create a new (empty) [`BaseDocument`] with the specified configuration
-    pub fn new(config: DocumentConfig) -> Self {
+    pub fn new(config: DocumentConfig) -> Result<Self, &'static str> {
         static ID_GENERATOR: AtomicUsize = AtomicUsize::new(1);
 
         let id = ID_GENERATOR.fetch_add(1, Ordering::SeqCst);
@@ -314,18 +329,17 @@ impl BaseDocument {
             .and_then(|url| DocumentUrl::from_str(&url).ok())
             .unwrap_or_default();
 
-        // text_system will be initialized when GPU context becomes available
-        let text_system = std::cell::RefCell::new(None);
+
 
         let net_provider = config
             .net_provider
-            .unwrap_or_else(|| Arc::new(DummyNetProvider));
+            .ok_or("NetProvider is required for production use")?;
         let navigation_provider = config
             .navigation_provider
-            .unwrap_or_else(|| Arc::new(DummyNavigationProvider));
+            .unwrap_or_else(|| Arc::new(crate::navigation::BlitzNavigationProvider::default()));
         let shell_provider = config
             .shell_provider
-            .unwrap_or_else(|| Arc::new(DummyShellProvider));
+            .ok_or("ShellProvider is required for production use")?;
 
         let mut doc = Self {
             id,
@@ -340,7 +354,6 @@ impl BaseDocument {
             url: base_url,
             ua_stylesheets: HashMap::new(),
             nodes_to_stylesheet: BTreeMap::new(),
-            text_system,
 
             hover_node_id: None,
             focus_node_id: None,
@@ -382,7 +395,7 @@ impl BaseDocument {
 
         // Bullet font will be loaded when text_system is accessed via with_text_system()
 
-        doc
+        Ok(doc)
     }
 
     /// Set the Document's networking provider
@@ -456,43 +469,68 @@ impl BaseDocument {
         false
     }
 
-    /// Safe access to text system with lazy initialization
-    /// Creates a headless text system if none exists - perfect for DOM operations without GPU
-    pub fn with_text_system<R>(&self, f: impl FnOnce(&mut blitz_text::UnifiedTextSystem) -> R) -> R {
-        let mut text_system_borrow = self.text_system.borrow_mut();
-        if text_system_borrow.is_none() {
-            // Use headless text system for DOM operations - no GPU required
-            *text_system_borrow = Some(blitz_text::UnifiedTextSystem::new_headless().expect("Failed to create headless text system"));
-        }
-        f(text_system_borrow.as_mut().unwrap())
+    /// Safe access to text system - uses global singleton
+    /// Returns an error if text system hasn't been initialized with GPU context
+    pub fn with_text_system<R>(&self, f: impl FnOnce(&blitz_text::UnifiedTextSystem) -> R) -> Result<R, &'static str> {
+        // Use the singleton's safe access method
+        // UnifiedTextSystem uses interior mutability so immutable reference is sufficient
+        crate::TextSystemSingleton::with_text_system(f)
+            .map_err(|_| "Text system not initialized - call initialize_text_system_with_gpu_context() first")
     }
 
-    /// Get a mutable reference to the text system with lazy initialization
-    /// This allows separate borrowing of nodes and text system to avoid borrow checker conflicts
-    pub fn get_text_system(&self) -> std::cell::RefMut<blitz_text::UnifiedTextSystem> {
-        let mut text_system_borrow = self.text_system.borrow_mut();
-        if text_system_borrow.is_none() {
-            // Use headless text system for DOM operations - no GPU required
-            *text_system_borrow = Some(blitz_text::UnifiedTextSystem::new_headless().expect("Failed to create headless text system"));
-        }
-        std::cell::RefMut::map(text_system_borrow, |opt| opt.as_mut().unwrap())
+
+
+    /// Load the bullet font into the text system for list item rendering
+    /// This ensures the Mozilla bullet font is available for list markers
+    pub fn load_bullet_font(&self) -> Result<(), &'static str> {
+        self.with_text_system(|text_system| {
+            text_system.with_font_system(|font_system| {
+                use std::sync::Arc;
+                let source = blitz_text::fontdb::Source::Binary(Arc::new(crate::BULLET_FONT.to_vec()));
+                font_system.db_mut().load_font_source(source);
+            })
+        })
     }
 
     /// Safe method to access both text system and nodes without borrow conflicts
-    /// This method ensures proper borrowing order and handles the text system initialization
-    pub fn with_text_and_nodes<R>(&mut self, f: impl FnOnce(&mut blitz_text::UnifiedTextSystem, &mut Box<Slab<Node>>) -> R) -> R {
-        // Initialize text system if needed
-        {
-            let mut text_system_borrow = self.text_system.borrow_mut();
-            if text_system_borrow.is_none() {
-                *text_system_borrow = Some(blitz_text::UnifiedTextSystem::new_headless().expect("Failed to create headless text system"));
-            }
+    /// Returns an error if text system hasn't been initialized with GPU context
+    pub fn with_text_and_nodes<R>(&mut self, f: impl FnOnce(&blitz_text::UnifiedTextSystem, &mut Box<Slab<Node>>) -> R) -> Result<R, &'static str> {
+        // Use singleton for text system access
+        crate::TextSystemSingleton::with_text_system(|text_system| {
+            f(text_system, &mut self.nodes)
+        }).map_err(|_| "Text system not initialized - call initialize_text_system_with_gpu_context() first")
+    }
+
+    /// Initialize text system with GPU context - must be called before using text system methods
+    /// This replaces the removed headless initialization pattern with proper GPU context usage
+    pub fn initialize_text_system_with_gpu_context(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        format: wgpu::TextureFormat,
+        multisample: wgpu::MultisampleState,
+        depth_stencil: Option<wgpu::DepthStencilState>,
+    ) -> Result<(), blitz_text::text_system::config::TextSystemError> {
+        // Use the singleton for initialization
+        crate::TextSystemSingleton::initialize_once(device, queue, format, multisample, depth_stencil)
+            .map_err(|e| match e {
+                crate::TextSystemSingletonError::InitializationFailed(msg) => {
+                    blitz_text::text_system::config::TextSystemError::Configuration(msg)
+                }
+                crate::TextSystemSingletonError::InvalidGpuContext => {
+                    blitz_text::text_system::config::TextSystemError::Configuration("Invalid GPU context".to_string())
+                }
+                crate::TextSystemSingletonError::NotInitialized => {
+                    blitz_text::text_system::config::TextSystemError::Configuration("Initialization failed".to_string())
+                }
+            })?;
+
+        // Load bullet font after text system initialization
+        if let Err(e) = self.load_bullet_font() {
+            eprintln!("Warning: Failed to load bullet font: {}", e);
         }
         
-        // Now we can safely borrow both - text system through RefCell and nodes directly
-        let mut text_system_borrow = self.text_system.borrow_mut();
-        let text_system = text_system_borrow.as_mut().unwrap();
-        f(text_system, &mut self.nodes)
+        Ok(())
     }
 
     pub fn mutate<'doc>(&'doc mut self) -> DocumentMutator<'doc> {
@@ -940,7 +978,7 @@ impl BaseDocument {
             }
             Resource::Font(bytes) => {
                 // Register font with blitz-text UnifiedTextSystem
-                self.with_text_system(|text_system| text_system.with_font_system(|font_system| {
+                let _ = self.with_text_system(|text_system| text_system.with_font_system(|font_system| {
                     use std::sync::Arc;
                     let source = blitz_text::fontdb::Source::Binary(Arc::new(bytes.to_vec()));
                     font_system.db_mut().load_font_source(source);
@@ -1302,67 +1340,68 @@ impl BaseDocument {
         resolve_layout_children_recursive(self, self.root_node().id);
 
         fn resolve_layout_children_recursive(doc: &mut BaseDocument, node_id: usize) {
-            // if doc.nodes[node_id].layout_children.borrow().is_none() {
-            let mut layout_children = Vec::new();
-            let mut anonymous_block: Option<usize> = None;
-            collect_layout_children(doc, node_id, &mut layout_children, &mut anonymous_block);
+            // Only recreate layout children if they don't already exist (caching)
+            if doc.nodes[node_id].layout_children.borrow().is_none() {
+                let mut layout_children = Vec::new();
+                let mut anonymous_block: Option<usize> = None;
+                collect_layout_children(doc, node_id, &mut layout_children, &mut anonymous_block);
 
-            // Recurse into newly collected layout children
-            for child_id in layout_children.iter().copied() {
-                resolve_layout_children_recursive(doc, child_id);
-                doc.nodes[child_id].layout_parent.set(Some(node_id));
-            }
+                // Recurse into newly collected layout children
+                for child_id in layout_children.iter().copied() {
+                    resolve_layout_children_recursive(doc, child_id);
+                    doc.nodes[child_id].layout_parent.set(Some(node_id));
+                }
 
-            *doc.nodes[node_id].layout_children.borrow_mut() = Some(layout_children.clone());
+                *doc.nodes[node_id].layout_children.borrow_mut() = Some(layout_children.clone());
 
-            // Debug logging for nodes that have canvas as child or are on path to canvas
-            if layout_children.contains(&54) {
-                println!(
-                    "📋🎯 Node {} has canvas 54 in its layout_children: {:?}",
-                    node_id, layout_children
-                );
-            }
-            if layout_children.contains(&53) {
-                println!(
-                    "📋🎯 Node {} has node 53 (canvas parent) in its layout_children: {:?}",
-                    node_id, layout_children
-                );
-            }
-            if node_id <= 10 {
-                println!(
-                    "📋🔍 Root node {} layout_children: {:?}",
-                    node_id, layout_children
-                );
-            }
+                // Debug logging for nodes that have canvas as child or are on path to canvas
+                if layout_children.contains(&54) {
+                    println!(
+                        "📋🎯 Node {} has canvas 54 in its layout_children: {:?}",
+                        node_id, layout_children
+                    );
+                }
+                if layout_children.contains(&53) {
+                    println!(
+                        "📋🎯 Node {} has node 53 (canvas parent) in its layout_children: {:?}",
+                        node_id, layout_children
+                    );
+                }
+                if node_id <= 10 {
+                    println!(
+                        "📋🔍 Root node {} layout_children: {:?}",
+                        node_id, layout_children
+                    );
+                }
 
-            // Debug logging for text containers and canvas elements
-            if node_id == 54
-                || (doc.nodes[node_id]
+                // Debug logging for text containers and canvas elements
+                if node_id == 54
+                    || (doc.nodes[node_id]
+                        .element_data()
+                        .map(|e| e.name.local.as_ref() == "canvas")
+                        .unwrap_or(false))
+                {
+                    println!(
+                        "📋 Setting paint_children for canvas node {}: {:?}",
+                        node_id, layout_children
+                    );
+                } else if doc.nodes[node_id]
                     .element_data()
-                    .map(|e| e.name.local.as_ref() == "canvas")
-                    .unwrap_or(false))
-            {
-                println!(
-                    "📋 Setting paint_children for canvas node {}: {:?}",
-                    node_id, layout_children
-                );
-            } else if doc.nodes[node_id]
-                .element_data()
-                .map(|e| ["h1", "h2", "p", "button"].contains(&e.name.local.as_ref()))
-                .unwrap_or(false)
-            {
-                println!(
-                    "📋 Setting paint_children for text node {}: {:?}",
-                    node_id, layout_children
-                );
-                println!(
-                    "📋   Text node {} actual children: {:?}",
-                    node_id, doc.nodes[node_id].children
-                );
-            }
+                    .map(|e| ["h1", "h2", "p", "button"].contains(&e.name.local.as_ref()))
+                    .unwrap_or(false)
+                {
+                    println!(
+                        "📋 Setting paint_children for text node {}: {:?}",
+                        node_id, layout_children
+                    );
+                    println!(
+                        "📋   Text node {} actual children: {:?}",
+                        node_id, doc.nodes[node_id].children
+                    );
+                }
 
-            *doc.nodes[node_id].paint_children.borrow_mut() = Some(layout_children);
-            // }
+                *doc.nodes[node_id].paint_children.borrow_mut() = Some(layout_children);
+            }
         }
     }
 
@@ -1579,17 +1618,18 @@ impl BaseDocument {
     }
 
     pub(crate) fn compute_is_animating(&self) -> bool {
-        TreeTraverser::new(self).any(|node_id| {
-            let node = &self.nodes[node_id];
-            let Some(element) = node.element_data() else {
-                return false;
-            };
-            if element.name.local == local_name!("canvas") && element.has_attr(local_name!("src")) {
-                return true;
+        // Check if any canvas elements with custom paint sources exist
+        // These need continuous redraws for time-based animations
+        for (_id, node) in self.nodes.iter() {
+            if let Some(element) = node.element_data() {
+                if let SpecialElementData::Canvas(_) = element.special_data {
+                    return true;
+                }
             }
-
-            false
-        })
+        }
+        
+        // TODO: Implement proper animation detection for CSS animations, transitions, etc.
+        false
     }
 
     /// Invalidate cursor cache for a specific node

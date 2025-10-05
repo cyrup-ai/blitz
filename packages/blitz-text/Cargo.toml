@@ -6,6 +6,8 @@ license = "MIT"
 description = "Advanced text shaping and layout engine for Blitz"
 
 [dependencies]
+# goldylox = { git = "https://github.com/cyrup-ai/goldylox", branch = "main" }
+goldylox = { path = "../../../goldylox" }
 glyphon = { git = "https://github.com/cyrup-ai/glyphon", branch = "main" }
 cosmyc-text = { git = "https://github.com/cyrup-ai/cosmyc-text", branch = "main" }
 wgpu = { git = "https://github.com/cyrup-ai/wgpu", branch = "main", package = "wgpu" }
@@ -36,7 +38,6 @@ memmap2 = "0.9.8"
 lz4_flex = "0.11"
 dashmap = "6.1.0"
 lru = "0.16.1"
-goldylox = { git = "https://github.com/cyrup-ai/goldylox", branch = "main" }
 serde = { version = "1.0.226", features = ["derive"] }
 serde_json = "1.0"
 

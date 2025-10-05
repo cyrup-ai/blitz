@@ -40,6 +40,11 @@ use std::sync::Arc;
 use arc_swap::ArcSwap;
 pub use cache::UnifiedCacheManager;
 use cosmyc_text::FontSystem;
+// Add missing imports for cache types
+use crate::measurement::enhanced::font_metrics::FontMetricsCache;
+use crate::bidi::cache::BidiCache;
+use crate::features::cache::FeaturesCache;
+use crate::measurement::cache::CacheManager;
 pub use enhanced::{BaselineInfo, EnhancedTextMeasurement, EnhancedTextMeasurer};
 pub use measurement_api::*;
 pub use thread_local::{
@@ -59,7 +64,7 @@ pub use types::{
 /// caching and zero-allocation optimizations.
 pub struct TextMeasurer {
     font_system: Arc<ArcSwap<FontSystem>>,
-    cache_manager: UnifiedCacheManager,
+    cache_manager: Arc<ArcSwap<UnifiedCacheManager>>,
     max_cache_size: usize,
     stats: Arc<MeasurementStatsInner>,
 }
@@ -67,13 +72,37 @@ pub struct TextMeasurer {
 impl TextMeasurer {
     /// Create a new TextMeasurer with default settings
     pub fn new() -> Self {
-        Self::with_cache_size(10000)
+        Self::with_cache_size(10000).unwrap_or_else(|_| {
+            // Fallback to basic implementation without goldylox if initialization fails
+            let font_system = Arc::new(ArcSwap::new(Arc::new(FontSystem::new())));
+            let cache_manager = Arc::new(ArcSwap::new(Arc::new(
+                UnifiedCacheManager::new().unwrap_or_else(|_| {
+                    // If goldylox cache creation fails, create fallback with default implementations
+                    UnifiedCacheManager {
+                        measurement_cache: CacheManager::new().unwrap_or_else(|_| {
+                            panic!("Failed to create measurement cache manager")
+                        }),
+                        font_metrics_cache: FontMetricsCache::default(),
+                        bidi_cache: BidiCache::default(),
+                        features_cache: FeaturesCache::default(),
+                    }
+                })
+            )));
+            let stats = Arc::new(MeasurementStatsInner::new());
+            
+            Self {
+                font_system,
+                cache_manager,
+                max_cache_size: 10000,
+                stats,
+            }
+        })
     }
 
     /// Create a new TextMeasurer with specified cache size
-    pub fn with_cache_size(max_cache_size: usize) -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn with_cache_size(max_cache_size: usize) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         let font_system = Arc::new(ArcSwap::new(Arc::new(FontSystem::new())));
-        let cache_manager = UnifiedCacheManager::new()?;
+        let cache_manager = Arc::new(ArcSwap::new(Arc::new(UnifiedCacheManager::new()?)));
         let stats = Arc::new(MeasurementStatsInner::new());
 
         Ok(Self {
@@ -85,9 +114,9 @@ impl TextMeasurer {
     }
 
     /// Create a new TextMeasurer with a pre-configured FontSystem
-    pub fn with_font_system(font_system: FontSystem) -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn with_font_system(font_system: FontSystem) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         let font_system_arc = Arc::new(ArcSwap::new(Arc::new(font_system)));
-        let cache_manager = UnifiedCacheManager::new()?;
+        let cache_manager = Arc::new(ArcSwap::new(Arc::new(UnifiedCacheManager::new()?)));
         let stats = Arc::new(MeasurementStatsInner::new());
 
         Ok(Self {
@@ -124,7 +153,7 @@ impl TextMeasurer {
         // Check cache first
         let cache_key = MeasurementCacheKey::new(text, font_size, max_width, font_family, baseline);
 
-        if let Some(cached) = self.cache_manager.get_measurement(&cache_key) {
+        if let Some(cached) = self.cache_manager.load().get_measurement(&cache_key) {
             self.stats
                 .total_measurements
                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -142,11 +171,12 @@ impl TextMeasurer {
             max_width,
             font_family,
             baseline,
-            &self.cache_manager,
+            &*self.cache_manager.load(),
         )?;
 
         // Cache the result
         self.cache_manager
+            .load()
             .cache_measurement(cache_key, measurement.clone());
         self.stats
             .total_measurements
@@ -174,7 +204,7 @@ impl TextMeasurer {
         };
         // font_size is now passed as parameter
 
-        text_measurement::get_character_positions(text, font_size, font_family, &self.cache_manager)
+        text_measurement::get_character_positions(text, font_size, font_family, &*self.cache_manager.load())
     }
 
     /// Calculate baseline for CSS baseline types
@@ -188,8 +218,6 @@ impl TextMeasurer {
         let shared_font_system = self.font_system.load();
         initialize_from_shared_font_system(&shared_font_system);
 
-        // First, we need to get a font_id from the font_family
-        // For now, use a simplified approach
         with_font_system(|font_system| {
             let query = cosmyc_text::fontdb::Query {
                 families: &[cosmyc_text::fontdb::Family::Name(font_family)],
@@ -203,7 +231,7 @@ impl TextMeasurer {
                     font_id,
                     font_size,
                     baseline_type,
-                    &self.cache_manager,
+                    &*self.cache_manager.load(),
                 )
                 .map_err(|_| MeasurementError::FontSystemError)
             } else {
@@ -277,14 +305,11 @@ impl TextMeasurer {
 
     /// Clear all caches (useful for memory management)
     pub fn clear_caches(&self) {
-        // Create new cache manager to effectively clear all caches
-        // The old cache will be garbage collected by crossbeam-epoch
-        let _new_cache_manager = UnifiedCacheManager::new();
-
-        // Note: We can't actually replace the cache_manager due to &self,
-        // but the epoch-based system will naturally clean up old entries
-        // when they're no longer referenced. In a real implementation,
-        // you might want to make cache_manager an ArcSwap as well.
+        // Create new cache manager and atomically swap it in
+        // Old cache will be dropped when no longer referenced (Arc refcount)
+        if let Ok(new_cache_manager) = UnifiedCacheManager::new() {
+            self.cache_manager.store(Arc::new(new_cache_manager));
+        }
     }
 
     /// Determine optimal baseline based on text content and available font metrics

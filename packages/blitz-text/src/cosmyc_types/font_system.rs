@@ -11,18 +11,32 @@ use cosmyc_text::{Attrs, Font, FontSystem, PlatformFallback};
 #[derive(Debug)]
 pub struct EnhancedFontSystem {
     inner: FontSystem,
+    embedded_fallback_id: cosmyc_text::fontdb::ID,
 }
 
 impl EnhancedFontSystem {
     /// Create new enhanced font system with thread-local initialization
     pub fn new() -> Self {
-        // Ensure thread-local FontSystem is initialized first
-        let _ = crate::measurement::thread_local::with_font_system(|_| {
-            // Thread-local FontSystem is now initialized
+        // Ensure thread-local FontSystem is initialized WITH embedded font
+        let _ = crate::measurement::thread_local::with_font_system(|font_system| {
+            // Thread-local FontSystem is now initialized with embedded font
+            crate::embedded_fallback::ensure_embedded_fallback(font_system)
         });
 
+        let mut font_system = FontSystem::new();
+
+        // CRITICAL: Load embedded fallback font to guarantee font_id validity
+        let embedded_fallback_id =
+            crate::embedded_fallback::load_embedded_fallback(font_system.db_mut());
+
+        log::debug!(
+            "Loaded embedded fallback font with ID: {:?}",
+            embedded_fallback_id
+        );
+
         Self {
-            inner: FontSystem::new(),
+            inner: font_system,
+            embedded_fallback_id,
         }
     }
 
@@ -47,25 +61,34 @@ impl EnhancedFontSystem {
             });
         }
 
-        // 5. Create enhanced font system with transferred data
+        // 5. Add embedded fallback to new database
+        let embedded_fallback_id = crate::embedded_fallback::load_embedded_fallback(&mut new_db);
+
+        // 6. Create enhanced font system with transferred data
         Self {
             inner: FontSystem::new_with_locale_and_db_and_fallback(
                 locale,
                 new_db,
                 PlatformFallback,
             ),
+            embedded_fallback_id,
         }
     }
 
     /// Create with custom fonts
     pub fn with_fonts(fonts: impl IntoIterator<Item = cosmyc_text::fontdb::Source>) -> Self {
-        // Ensure thread-local FontSystem is initialized first
-        let _ = crate::measurement::thread_local::with_font_system(|_| {
-            // Thread-local FontSystem is now initialized
+        // Ensure thread-local FontSystem is initialized WITH embedded font
+        let _ = crate::measurement::thread_local::with_font_system(|font_system| {
+            crate::embedded_fallback::ensure_embedded_fallback(font_system)
         });
 
+        let mut font_system = FontSystem::new_with_fonts(fonts);
+        let embedded_fallback_id =
+            crate::embedded_fallback::load_embedded_fallback(font_system.db_mut());
+
         Self {
-            inner: FontSystem::new_with_fonts(fonts),
+            inner: font_system,
+            embedded_fallback_id,
         }
     }
 
@@ -119,6 +142,41 @@ impl EnhancedFontSystem {
             .faces()
             .filter_map(|face_info| face_info.families.first().map(|(name, _)| name.clone()))
             .collect()
+    }
+
+    /// Get the font ID of the guaranteed embedded fallback font
+    pub fn embedded_fallback_id(&self) -> cosmyc_text::fontdb::ID {
+        self.embedded_fallback_id
+    }
+
+    /// Get font data with guaranteed success using embedded fallback
+    ///
+    /// This method NEVER returns None. If the requested font_id is not found,
+    /// it automatically falls back to the embedded fallback font.
+    ///
+    /// Returns (font_data, face_index) tuple.
+    pub fn get_font_data_guaranteed(
+        &self,
+        font_id: cosmyc_text::fontdb::ID,
+    ) -> (Vec<u8>, u32) {
+        self.inner
+            .db()
+            .with_face_data(font_id, |data, face_index| (data.to_vec(), face_index))
+            .unwrap_or_else(|| {
+                log::warn!(
+                    "Font ID {:?} not found in database, using embedded fallback (ID: {:?})",
+                    font_id,
+                    self.embedded_fallback_id
+                );
+
+                // Fall back to embedded font (guaranteed to exist)
+                self.inner
+                    .db()
+                    .with_face_data(self.embedded_fallback_id, |data, face_index| {
+                        (data.to_vec(), face_index)
+                    })
+                    .expect("BUG: Embedded fallback font must always be available in database")
+            })
     }
 }
 

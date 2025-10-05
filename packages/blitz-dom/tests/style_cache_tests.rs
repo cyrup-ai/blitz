@@ -9,7 +9,6 @@
 //! - Performance characteristics and memory efficiency
 //! - Error handling and edge cases
 
-use std::sync::atomic::Ordering;
 use blitz_dom::BaseDocument;
 use taffy::NodeId;
 
@@ -216,6 +215,7 @@ mod style_cache_tests {
         // This would typically involve setting up a proper BaseDocument with stylist, etc.
         // For now, we'll create a mock that has the essential components
         BaseDocument::new(blitz_dom::DocumentConfig::default())
+            .expect("Failed to create test document")
     }
 
     fn create_test_node(doc: &mut BaseDocument) -> usize {

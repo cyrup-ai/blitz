@@ -34,6 +34,7 @@ fn create_test_parent_context() -> ParentGridContext {
         parent_has_subgrid_columns: false,
         row_track_count: 3,
         column_track_count: 2,
+        parent_size: taffy::Size::NONE,
     }
 }
 
@@ -48,6 +49,7 @@ fn create_empty_parent_context() -> ParentGridContext {
         parent_has_subgrid_columns: false,
         row_track_count: 0,
         column_track_count: 0,
+        parent_size: taffy::Size::NONE,
     }
 }
 
@@ -382,7 +384,7 @@ mod error_handling_tests {
             taffy::TrackSizingFunction::from_length(200.0),
         ];
 
-        let start = 0;
+        let _start = 0;
         let end = 5; // Exceeds track count
 
         if end > tracks.len() {

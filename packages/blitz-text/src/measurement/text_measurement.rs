@@ -93,7 +93,10 @@ pub fn perform_measurement(
             let mut overall_cap_height = 0.0f32;
             let mut advance_width = 0.0f32;
             let mut all_glyphs = Vec::new();
-            let measurement_time = Instant::now();
+            let measurement_time = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis() as u64;
 
             // Create buffer for text measurement
             let mut buffer = Buffer::new(

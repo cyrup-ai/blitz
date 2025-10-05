@@ -7,6 +7,8 @@
 //! - Lock-free caching for blazing-fast performance
 //! - Integration with cosmyc-text shaping system
 
+use cosmyc_text::{FontSystem, Metrics};
+
 pub mod cache;
 pub mod cursor;
 pub mod multiline;
@@ -164,9 +166,11 @@ impl BidiRenderer {
         &mut self,
         text: &str,
         options: &BidiRenderOptions,
+        font_system: &mut FontSystem,
+        metrics: Metrics,
     ) -> Result<MultiLineBidiResult, BidiError> {
         self.multiline_processor
-            .process_multiline_bidi_text(text, options)
+            .process_multiline_bidi_text(text, options, font_system, metrics)
     }
 
     /// Wrap text to fit within specified width
@@ -175,9 +179,11 @@ impl BidiRenderer {
         text: &str,
         options: &BidiRenderOptions,
         shaped_runs: &[crate::types::ShapedRun],
+        font_system: &mut FontSystem,
+        metrics: Metrics,
     ) -> Result<Vec<(ProcessedBidi, Vec<crate::types::ShapedRun>)>, BidiError> {
         self.multiline_processor
-            .wrap_text(text, options, shaped_runs)
+            .wrap_text(text, options, shaped_runs, font_system, metrics)
     }
 
     /// Get BiDi processing statistics

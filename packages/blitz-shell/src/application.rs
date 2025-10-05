@@ -35,19 +35,33 @@ impl<Rend: WindowRenderer> BlitzApplication<Rend> {
 
 impl<Rend: WindowRenderer> ApplicationHandler<BlitzShellEvent> for BlitzApplication<Rend> {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+        println!("📱 ApplicationHandler::resumed() called - existing windows: {}, pending windows: {}", 
+                 self.windows.len(), self.pending_windows.len());
+        
         // Resume existing windows
-        for (_, view) in self.windows.iter_mut() {
-            view.resume();
+        for (window_id, view) in self.windows.iter_mut() {
+            println!("📱 Resuming existing window: {:?}", window_id);
+            if let Err(e) = view.resume() {
+                eprintln!("❌ Failed to resume window {:?}: {}", window_id, e);
+            }
         }
 
         // Initialise pending windows
         for window_config in self.pending_windows.drain(..) {
+            println!("📱 Initializing pending window");
             let mut view = View::init(window_config, event_loop, &self.proxy);
-            view.resume();
-            if !view.renderer.is_active() {
-                continue;
+            match view.resume() {
+                Ok(()) => {
+                    if view.renderer.is_active() {
+                        self.windows.insert(view.window_id(), view);
+                    } else {
+                        eprintln!("❌ Window renderer is not active after resume");
+                    }
+                }
+                Err(e) => {
+                    eprintln!("❌ Failed to resume new window: {}", e);
+                }
             }
-            self.windows.insert(view.window_id(), view);
         }
     }
 

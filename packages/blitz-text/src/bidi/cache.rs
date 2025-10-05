@@ -5,6 +5,7 @@ use std::sync::atomic::AtomicUsize;
 use goldylox::prelude::*;
 use serde::{Deserialize, Serialize};
 use serde_json;
+use unicode_bidi::BidiInfo;
 
 use crate::bidi::types::*;
 
@@ -59,6 +60,10 @@ pub struct BidiCache {
 
 impl BidiCache {
     pub fn new() -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static CACHE_COUNTER: AtomicU64 = AtomicU64::new(0);
+        let cache_id = format!("bidi_cache_{}", CACHE_COUNTER.fetch_add(1, Ordering::Relaxed));
+        
         let cache = GoldyloxBuilder::<String, ProcessedBidi>::new()
             .hot_tier_max_entries(500)
             .hot_tier_memory_limit_mb(32)
@@ -67,7 +72,7 @@ impl BidiCache {
             .cold_tier_max_size_bytes(512 * 1024 * 1024) // 512MB
             .compression_level(4)
             .background_worker_threads(1)
-            .cache_id("bidi_cache")
+            .cache_id(&cache_id)
             .build()?;
 
         Ok(Self { cache })
@@ -116,9 +121,13 @@ impl Default for BidiCache {
     fn default() -> Self {
         Self::new().unwrap_or_else(|_| {
             // Fallback: create a minimal cache that always works
+            use std::sync::atomic::{AtomicU64, Ordering};
+            static FALLBACK_COUNTER: AtomicU64 = AtomicU64::new(0);
+            let fallback_cache_id = format!("bidi_cache_fallback_{}", FALLBACK_COUNTER.fetch_add(1, Ordering::Relaxed));
+            
             BidiCache {
-                cache: GoldyloxBuilder::<String, BidiInfo>::new()
-                    .cache_id("bidi_cache_fallback")
+                cache: GoldyloxBuilder::<String, ProcessedBidi>::new()
+                    .cache_id(&fallback_cache_id)
                     .build()
                     .unwrap(),
             }

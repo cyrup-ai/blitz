@@ -11,6 +11,8 @@ edition = "2024"
 rust-version = "1.85.0"
 
 [features]
+default = []
+tracing = ["dep:tracing"]
 cookies = ["reqwest/cookies"]
 
 [dependencies]
@@ -21,3 +23,4 @@ blitz-traits = { path = "../blitz-traits" }
 tokio = "1.47.1"
 reqwest = { git = "https://github.com/cyrup-ai/reqwest", branch = "main" }
 data-url = "0.3.2"
+tracing = { version = "0.1.41", optional = true }

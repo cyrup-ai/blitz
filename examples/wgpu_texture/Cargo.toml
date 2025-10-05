@@ -17,8 +17,9 @@ blitz-dom = { path = "../../packages/blitz-dom" }
 blitz-html = { path = "../../packages/blitz-html" }
 blitz-shell = { path = "../../packages/blitz-shell" }
 mini-dxn = { path = "../../packages/mini-dxn" }
-dioxus = { path = "../../../dioxus/packages/dioxus" }
+dioxus = { git = "https://github.com/cyrup-ai/dioxus", branch = "main", package = "dioxus" }
 wgpu = { git = "https://github.com/cyrup-ai/wgpu", branch = "main", package = "wgpu" }
 color = "0.3.1"
 bytemuck = "1.23.1"
 pollster = "0.4.0"
+log = "0.4.28"

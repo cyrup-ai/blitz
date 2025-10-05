@@ -23,6 +23,8 @@ pub struct ParentGridContext {
     pub row_track_count: usize,
     /// Number of column tracks in parent grid
     pub column_track_count: usize,
+    /// Parent container size for percentage resolution
+    pub parent_size: taffy::Size<Option<f32>>,
 }
 
 /// Error types for generic tree grid context resolution

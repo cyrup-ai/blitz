@@ -2,6 +2,7 @@
 
 use goldylox::prelude::*;
 use serde::{Deserialize, Serialize};
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 /// GPU cache statistics
 #[derive(Debug, Default, Clone)]
@@ -89,6 +90,8 @@ pub struct EnhancedGpuCache {
     glyphon_cache: glyphon::Cache,
     /// Secondary goldylox cache for application-level GPU resource caching
     resource_cache: Goldylox<String, GpuResource>,
+    /// Counter for resource cache entries
+    resource_cache_size: AtomicUsize,
 }
 
 impl EnhancedGpuCache {
@@ -109,6 +112,7 @@ impl EnhancedGpuCache {
         Ok(Self {
             glyphon_cache,
             resource_cache,
+            resource_cache_size: AtomicUsize::new(0),
         })
     }
 
@@ -133,26 +137,44 @@ impl EnhancedGpuCache {
 
     /// Put GPU resource into resource cache
     pub fn put(&self, key: String, value: GpuResource) -> Result<(), Box<dyn std::error::Error>> {
-        self.resource_cache
+        let result = self.resource_cache
             .put(key, value)
-            .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)
+            .map_err(|e| Box::new(e) as Box<dyn std::error::Error>);
+
+        if result.is_ok() {
+            self.resource_cache_size.fetch_add(1, Ordering::Relaxed);
+        }
+
+        result
     }
 
     /// Clear resource cache
     pub fn clear(&self) {
         if let Err(e) = self.resource_cache.clear() {
             eprintln!("Warning: Failed to clear GPU resource cache: {}", e);
+        } else {
+            self.resource_cache_size.store(0, Ordering::Relaxed);
         }
     }
 
     pub fn len(&self) -> usize {
-        // Goldylox doesn't expose len() - return 0 as placeholder
-        0
+        // Note: glyphon::Cache doesn't expose size information, so we only count resource cache
+        // Get resource cache size from our atomic counter
+        let resource_size = self.resource_cache_size.load(Ordering::Relaxed);
+
+        resource_size
     }
 
     /// Get cache statistics
     pub fn get_stats(&self) -> GpuCacheStats {
-        GpuCacheStats::default()
+        let total_entries = self.len();
+
+        GpuCacheStats {
+            hits: 0,
+            misses: 0,
+            evictions: 0,
+            size_bytes: total_entries as u64,
+        }
     }
 
     /// Optimize cache performance

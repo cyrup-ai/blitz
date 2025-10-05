@@ -27,9 +27,9 @@ pub struct DocumentConfig {
     // text_system is now managed internally by BaseDocument - no longer in config
 }
 
-#[cfg(test)]
 impl DocumentConfig {
     /// Create test-friendly DocumentConfig following established dummy provider pattern
+    /// This method is always available to support both unit tests and integration tests
     pub fn for_testing() -> Self {
         Self {
             viewport: Some(blitz_traits::shell::Viewport::default()),

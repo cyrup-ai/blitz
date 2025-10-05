@@ -76,6 +76,15 @@ impl VelloWindowRenderer {
         self.render_state.current_device_handle()
     }
 
+    pub fn current_surface_format(&self) -> Option<wgpu::TextureFormat> {
+        match &self.render_state {
+            RenderState::Active(state) => Some(state.surface.config.format),
+            RenderState::Suspended => None,
+        }
+    }
+
+
+
     pub fn register_custom_paint_source(&mut self, mut source: Box<dyn CustomPaintSource>) -> u64 {
         if let Some(device_handle) = self.render_state.current_device_handle() {
             let instance = &self.wgpu_context.instance;
@@ -83,14 +92,21 @@ impl VelloWindowRenderer {
         }
         let id = PAINT_SOURCE_ID.fetch_add(1, atomic::Ordering::SeqCst);
         self.custom_paint_sources.insert(id, source);
+        let self_ptr = self as *const Self;
+        println!("🔧🔧 register_custom_paint_source: VelloWindowRenderer instance {:p}, registered source with ID {}, map now has {} sources", 
+                 self_ptr, id, self.custom_paint_sources.len());
 
         id
     }
 
     pub fn unregister_custom_paint_source(&mut self, id: u64) {
+        println!("⚠️ unregister_custom_paint_source called for ID {}", id);
         if let Some(mut source) = self.custom_paint_sources.remove(&id) {
+            println!("⚠️ Removed paint source ID {} from map, map now has {} sources", id, self.custom_paint_sources.len());
             source.suspend();
             drop(source);
+        } else {
+            println!("⚠️ Paint source ID {} not found in map", id);
         }
     }
 }
@@ -106,6 +122,10 @@ impl WindowRenderer for VelloWindowRenderer {
     }
 
     fn resume(&mut self, window_handle: Arc<dyn WindowHandle>, width: u32, height: u32) {
+        let self_ptr = self as *const Self;
+        println!("🟣 VelloWindowRenderer::resume() instance {:p} - custom_paint_sources has {} sources BEFORE resume", 
+                 self_ptr, self.custom_paint_sources.len());
+        
         let surface = pollster::block_on(self.wgpu_context.create_surface(
             window_handle.clone(),
             width,
@@ -128,30 +148,66 @@ impl WindowRenderer for VelloWindowRenderer {
 
         self.render_state = RenderState::Active(ActiveRenderState { renderer, surface });
 
-        let device_handle = self.render_state.current_device_handle().unwrap();
-        let instance = &self.wgpu_context.instance;
-        for source in self.custom_paint_sources.values_mut() {
-            source.resume(instance, device_handle)
+        // Get device handle and initialize custom paint sources
+        {
+            let device_handle = self.render_state.current_device_handle().unwrap();
+            let instance = &self.wgpu_context.instance;
+            println!("🟣 VelloWindowRenderer::resume() - resuming {} custom paint sources", 
+                     self.custom_paint_sources.len());
+            for source in self.custom_paint_sources.values_mut() {
+                source.resume(instance, device_handle)
+            }
         }
+        
+        println!("🟣 VelloWindowRenderer::resume() completed - custom_paint_sources has {} sources AFTER resume", 
+                 self.custom_paint_sources.len());
 
-        // Initialize glyphon text rendering system using the constructor
-        let RenderState::Active(ref state) = self.render_state else {
+        // Initialize glyphon text rendering system and vello resolver
+        let RenderState::Active(ref mut state) = self.render_state else {
             panic!("Expected active render state");
         };
 
+        println!("🎯 INITIALIZING GLYPHON STATE in resume()");
         self.glyphon_state = Some(GlyphonState::new(
-            &device_handle.device,
-            &device_handle.queue,
+            &state.surface.device_handle.device,
+            &state.surface.device_handle.queue,
             state.surface.config.format,
             width,
             height,
         ));
+        println!("✅ GLYPHON STATE INITIALIZED SUCCESSFULLY");
+
+        // Text system initialization will be handled separately
+        // since we don't have access to the document here
+
+        // Initialize vello resolver with GPU context for text rendering
+        match state.renderer.initialize_resolver(
+            &state.surface.device_handle.device,
+            &state.surface.device_handle.queue,
+            state.surface.config.format,
+        ) {
+            Ok(()) => {
+                log::info!("Successfully initialized vello resolver with GPU context");
+            }
+            Err(e) => {
+                log::error!("Failed to initialize vello resolver: {}", e);
+                return;
+            }
+        }
     }
 
     fn suspend(&mut self) {
+        println!("🔴 VelloWindowRenderer::suspend() called - custom_paint_sources has {} sources", 
+                 self.custom_paint_sources.len());
         for source in self.custom_paint_sources.values_mut() {
             source.suspend()
         }
+        
+        // Clean up vello resolver resources
+        if let RenderState::Active(state) = &mut self.render_state {
+            state.renderer.cleanup_resolver();
+        }
+        
         self.glyphon_state = None; // Drop glyphon resources
         self.render_state = RenderState::Suspended;
     }
@@ -162,8 +218,50 @@ impl WindowRenderer for VelloWindowRenderer {
         };
     }
 
+    fn initialize_text_system(&self, doc: &dyn std::any::Any) -> Result<(), String> {
+        println!("🔧 VelloWindowRenderer::initialize_text_system called");
+        // Try to downcast to BaseDocument
+        if let Some(base_doc) = doc.downcast_ref::<blitz_dom::BaseDocument>() {
+            println!("🔧 Successfully downcast to BaseDocument");
+            if let Some(device_handle) = self.current_device_handle() {
+                let format = self.current_surface_format().unwrap_or(wgpu::TextureFormat::Bgra8UnormSrgb);
+                println!("🎯 INITIALIZING TEXT SYSTEM with GPU context");
+                match base_doc.initialize_text_system_with_gpu_context(
+                    &device_handle.device,
+                    &device_handle.queue,
+                    format,
+                    wgpu::MultisampleState::default(),
+                    None,
+                ) {
+                    Ok(()) => {
+                        println!("✅ TEXT SYSTEM INITIALIZED SUCCESSFULLY");
+                        Ok(())
+                    }
+                    Err(e) => {
+                        println!("❌ TEXT SYSTEM INITIALIZATION FAILED: {}", e);
+                        Err(format!("Text system initialization failed: {}", e))
+                    }
+                }
+            } else {
+                println!("❌ NO GPU DEVICE HANDLE AVAILABLE for text system initialization");
+                Err("No GPU device handle available".to_string())
+            }
+        } else {
+            Err("Document is not a BaseDocument".to_string())
+        }
+    }
+
     fn render<F: FnOnce(&mut Self::ScenePainter<'_>)>(&mut self, draw_fn: F) {
         log::trace!("VelloWindowRenderer::render() called");
+        
+        // Get self pointer and log BEFORE any borrows
+        let self_ptr = self as *const Self;
+        println!("🔧🔧 render: VelloWindowRenderer instance {:p}, creating VelloScenePainter with {} custom paint sources", 
+                 self_ptr, self.custom_paint_sources.len());
+        for (id, _) in self.custom_paint_sources.iter() {
+            println!("🔧🔧   source ID in renderer map: {}", id);
+        }
+        
         let RenderState::Active(state) = &mut self.render_state else {
             log::warn!("Renderer is not active, skipping render");
             return;
@@ -292,6 +390,7 @@ impl WindowRenderer for VelloWindowRenderer {
 
         // Render glyphon text on top of vello shapes
         if let Some(glyphon) = &mut self.glyphon_state {
+            println!("🎯 GLYPHON RENDER: {} pending text areas", glyphon.pending_text_areas.len());
             // Create render pass for text
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("Glyphon Text Pass"),

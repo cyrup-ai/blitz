@@ -62,6 +62,7 @@ color = "0.3"
 # Blitz text rendering dependencies
 blitz-text = { path = "../blitz-text" }
 blitz-font = { path = "../blitz-font" }
+wgpu = { git = "https://github.com/cyrup-ai/wgpu", branch = "main", package = "wgpu" }
 
 # Other dependencies
 slab = "0.4.11"

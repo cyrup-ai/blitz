@@ -56,6 +56,8 @@ pub struct MutationWriter<'a> {
     pub docm: DocumentMutator<'a>,
     /// The state associated with this writer
     pub state: &'a mut DioxusState,
+    /// Track if any mutations have occurred
+    has_changes: bool,
 }
 
 impl<'a> MutationWriter<'a> {
@@ -63,7 +65,12 @@ impl<'a> MutationWriter<'a> {
         MutationWriter {
             docm: doc.mutate(),
             state,
+            has_changes: false,
         }
+    }
+
+    pub fn has_changes(&self) -> bool {
+        self.has_changes
     }
 }
 
@@ -97,6 +104,8 @@ impl MutationWriter<'_> {
 impl WriteMutations for MutationWriter<'_> {
     fn assign_node_id(&mut self, path: &'static [u8], id: ElementId) {
         trace!("assign_node_id path:{:?} id:{}", path, id.0);
+        println!("🔄 MUTATION: assign_node_id path:{:?} id:{}", path, id.0);
+        self.has_changes = true;
 
         // If there is an existing node already mapped to that ID and it has no parent, then drop it
         // TODO: more automated GC/ref-counted semantics for node lifetimes
@@ -110,42 +119,51 @@ impl WriteMutations for MutationWriter<'_> {
 
     fn create_placeholder(&mut self, id: ElementId) {
         trace!("create_placeholder id:{}", id.0);
+        println!("🔄 MUTATION: create_placeholder id:{}", id.0);
+        self.has_changes = true;
         let node_id = self.docm.create_comment_node();
         self.map_new_node(node_id, id);
     }
 
     fn create_text_node(&mut self, value: &str, id: ElementId) {
         trace!("create_text_node id:{} text:{}", id.0, value);
+        println!("🔄 MUTATION: create_text_node id:{} text:{}", id.0, value);
+        self.has_changes = true;
         let node_id = self.docm.create_text_node(value);
         self.map_new_node(node_id, id);
     }
 
     fn append_children(&mut self, id: ElementId, m: usize) {
         trace!("append_children id:{} m:{}", id.0, m);
+        self.has_changes = true;
         let (parent_id, child_node_ids) = self.state.anchor_and_nodes(id, m);
         self.docm.append_children(parent_id, &child_node_ids);
     }
 
     fn insert_nodes_after(&mut self, id: ElementId, m: usize) {
         trace!("insert_nodes_after id:{} m:{}", id.0, m);
+        self.has_changes = true;
         let (anchor_node_id, new_node_ids) = self.state.anchor_and_nodes(id, m);
         self.docm.insert_nodes_after(anchor_node_id, &new_node_ids);
     }
 
     fn insert_nodes_before(&mut self, id: ElementId, m: usize) {
         trace!("insert_nodes_before id:{} m:{}", id.0, m);
+        self.has_changes = true;
         let (anchor_node_id, new_node_ids) = self.state.anchor_and_nodes(id, m);
         self.docm.insert_nodes_before(anchor_node_id, &new_node_ids);
     }
 
     fn replace_node_with(&mut self, id: ElementId, m: usize) {
         trace!("replace_node_with id:{} m:{}", id.0, m);
+        self.has_changes = true;
         let (anchor_node_id, new_node_ids) = self.state.anchor_and_nodes(id, m);
         self.docm.replace_node_with(anchor_node_id, &new_node_ids);
     }
 
     fn replace_placeholder_with_nodes(&mut self, path: &'static [u8], m: usize) {
         trace!("replace_placeholder_with_nodes path:{:?} m:{}", path, m);
+        self.has_changes = true;
         // WARNING: DO NOT REORDER
         // The order of the following two lines is very important as "m_stack_nodes" mutates
         // the stack and then "load_child" reads from the top of the stack.
@@ -156,18 +174,21 @@ impl WriteMutations for MutationWriter<'_> {
 
     fn remove_node(&mut self, id: ElementId) {
         trace!("remove_node id:{}", id.0);
+        self.has_changes = true;
         let node_id = self.state.element_to_node_id(id);
         self.docm.remove_node(node_id);
     }
 
     fn push_root(&mut self, id: ElementId) {
         trace!("push_root id:{}", id.0);
+        // push_root doesn't change the DOM, only internal state
         let node_id = self.state.element_to_node_id(id);
         self.state.stack.push(node_id);
     }
 
     fn set_node_text(&mut self, value: &str, id: ElementId) {
         trace!("set_node_text id:{} value:{}", id.0, value);
+        self.has_changes = true;
         let node_id = self.state.element_to_node_id(id);
         self.docm.set_node_text(node_id, value);
     }
@@ -181,6 +202,7 @@ impl WriteMutations for MutationWriter<'_> {
     ) {
         let node_id = self.state.element_to_node_id(id);
         trace!("set_attribute node_id:{node_id} ns: {ns:?} name:{local_name}, value:{value:?}");
+        self.has_changes = true;
 
         // Dioxus has overloaded the style namespace to accumulate style attributes without a `style` block
         // TODO: accumulate style attributes into a single style element.
@@ -228,6 +250,8 @@ impl WriteMutations for MutationWriter<'_> {
 
     fn load_template(&mut self, template: Template, index: usize, id: ElementId) {
         // TODO: proper template node support
+        println!("🔄 MUTATION: load_template index:{} id:{}", index, id.0);
+        self.has_changes = true;
         let template_entry = self.state.templates.entry(template).or_insert_with(|| {
             let template_root_ids: Vec<NodeId> = template
                 .roots
@@ -248,6 +272,7 @@ impl WriteMutations for MutationWriter<'_> {
     fn create_event_listener(&mut self, name: &'static str, id: ElementId) {
         // We're going to actually set the listener here as a placeholder - in JS this would also be a placeholder
         // we might actually just want to attach the attribute to the root element (delegation)
+        self.has_changes = true;
         let value = AttributeValue::Text("<rust func>".into());
         self.set_attribute(name, None, &value, id);
 
@@ -260,6 +285,7 @@ impl WriteMutations for MutationWriter<'_> {
 
     fn remove_event_listener(&mut self, _name: &'static str, _id: ElementId) {
         // node.remove_event_listener(name);
+        self.has_changes = true;
     }
 }
 

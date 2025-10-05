@@ -283,21 +283,11 @@ impl PaintScene for VelloCpuScenePainter {
                 let first_glyph = glyphs[0];
                 let font_size = first_glyph.font_size;
 
-                // Get actual font data using blitz-text's FontSystem
-                let font_system = blitz_text::FontSystem::new();
-                let font = font_system
-                    .db()
-                    .with_face_data(font_id, |font_data, face_index| {
-                        let font_blob = peniko::Blob::new(std::sync::Arc::new(font_data.to_vec()));
-                        Font::new(font_blob, face_index)
-                    })
-                    .unwrap_or_else(|| {
-                        // Fallback: create minimal valid font if font ID not found
-                        // This should rarely happen in production
-                        let fallback_data = vec![0u8; 4];
-                        let font_blob = peniko::Blob::new(std::sync::Arc::new(fallback_data));
-                        Font::new(font_blob, 0)
-                    });
+                // Get actual font data using blitz-text's EnhancedFontSystem
+                let font_system = blitz_text::EnhancedFontSystem::new();
+                let (font_data, face_index) = font_system.get_font_data_guaranteed(font_id);
+                let font_blob = peniko::Blob::new(std::sync::Arc::new(font_data));
+                let font = Font::new(font_blob, face_index);
 
                 // Convert blitz_text glyphs to vello_cpu glyphs
                 let vello_glyphs: Vec<crate::vello_cpu::vello_common::glyph::Glyph> = glyphs

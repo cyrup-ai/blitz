@@ -101,41 +101,15 @@ enum CacheType {
 
 impl FontMetricsCache {
     pub fn new() -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
-        // Try to create Goldylox cache with proper error handling and fallback
-        let cache_type = match GoldyloxBuilder::new()
-            .hot_tier_max_entries(200)
-            .hot_tier_memory_limit_mb(16)
-            .warm_tier_max_entries(800)
-            .warm_tier_max_memory_bytes(32 * 1024 * 1024) // 32MB
-            .cold_tier_max_size_bytes(64 * 1024 * 1024) // 64MB
-            .compression_level(5)
-            .background_worker_threads(1)
-            .cache_id("font_metrics_cache")
-            .build() {
-                Ok(cache) => {
-                    println!("Successfully initialized Goldylox font metrics cache");
-                    CacheType::Goldylox(cache)
-                },
-                Err(e) => {
-                    eprintln!("Warning: Failed to initialize Goldylox cache: {}. Trying minimal configuration...", e);
-                    // Try a minimal cache configuration that should work on any system
-                    match GoldyloxBuilder::new()
-                        .hot_tier_max_entries(50)
-                        .hot_tier_memory_limit_mb(4)
-                        .cache_id("font_metrics_fallback")
-                        .build() {
-                            Ok(fallback_cache) => {
-                                println!("Successfully initialized minimal Goldylox font metrics cache");
-                                CacheType::Goldylox(fallback_cache)
-                            },
-                            Err(fallback_err) => {
-                                eprintln!("Warning: Both Goldylox cache attempts failed: primary={}, fallback={}. Using HashMap fallback.", e, fallback_err);
-                                // Final fallback: simple HashMap-based cache
-                                CacheType::HashMap(Mutex::new(HashMap::new()))
-                            }
-                        }
-                }
-            };
+        println!("✅ FontMetricsCache using Goldylox for efficient multi-tier caching");
+        
+        // Use Goldylox with proper types (both FontMetricsCacheKey and FontMetrics implement required traits)
+        let cache = GoldyloxBuilder::<FontMetricsCacheKey, FontMetrics>::new()
+            .memory_capacity(8 * 1024 * 1024) // 8MB for font metrics
+            .disk_cache(None) // In-memory only for font metrics (lightweight data)
+            .build()?;
+            
+        let cache_type = CacheType::Goldylox(cache);
 
         Ok(Self { cache_type })
     }
@@ -229,12 +203,9 @@ impl FontMetricsCache {
 impl Default for FontMetricsCache {
     fn default() -> Self {
         Self::new().unwrap_or_else(|_| {
-            // Fallback: create a minimal cache that always works
+            // Fallback: create a minimal HashMap-based cache that always works
             FontMetricsCache {
-                cache: GoldyloxBuilder::<String, CachedFontMetrics>::new()
-                    .cache_id("font_metrics_cache_fallback")
-                    .build()
-                    .unwrap(),
+                cache_type: CacheType::HashMap(Mutex::new(HashMap::new())),
             }
         })
     }
@@ -293,17 +264,75 @@ impl FontMetricsCalculator {
     /// Extract comprehensive font metrics for given attributes
     pub fn extract_comprehensive_font_metrics(
         &self,
-        _attrs: &cosmyc_text::Attrs,
-        _font_system: &mut cosmyc_text::FontSystem,
+        attrs: &cosmyc_text::Attrs,
+        font_system: &mut cosmyc_text::FontSystem,
     ) -> Result<FontMetrics, Box<dyn std::error::Error + Send + Sync>> {
-        // Return default font metrics for now since we can't access fontdb::ID constructor
-        // TODO: Implement proper font ID retrieval from FontSystem once API is clarified
-        Ok(FontMetrics::default())
+        // Extract font family from attrs
+        let font_family = match attrs.family {
+            cosmyc_text::Family::Name(name) => name,
+            cosmyc_text::Family::Serif => "serif",
+            cosmyc_text::Family::SansSerif => "sans-serif",
+            cosmyc_text::Family::Cursive => "cursive",
+            cosmyc_text::Family::Fantasy => "fantasy",
+            cosmyc_text::Family::Monospace => "monospace",
+        };
+        
+        // Create query from attrs
+        let query = cosmyc_text::fontdb::Query {
+            families: &[cosmyc_text::fontdb::Family::Name(font_family)],
+            weight: cosmyc_text::fontdb::Weight(attrs.weight.0),
+            stretch: attrs.stretch,
+            style: match attrs.style {
+                cosmyc_text::Style::Normal => cosmyc_text::fontdb::Style::Normal,
+                cosmyc_text::Style::Italic => cosmyc_text::fontdb::Style::Italic,
+                cosmyc_text::Style::Oblique => cosmyc_text::fontdb::Style::Oblique,
+            },
+        };
+        
+        // Get font ID from database
+        let font_id = font_system
+            .db()
+            .query(&query)
+            .ok_or("Font not found for given attributes")?;
+        
+        // Extract metrics using existing helper (see font_metrics.rs)
+        let mut result = None;
+        font_system
+            .db_mut()
+            .with_face_data(font_id, |font_data, face_index| {
+                if let Ok(face) = ttf_parser::Face::parse(font_data, face_index) {
+                    result = Some(FontMetrics {
+                        units_per_em: face.units_per_em(),
+                        ascent: face.ascender(),
+                        descent: face.descender(),
+                        line_gap: face.line_gap(),
+                        x_height: face.x_height(),
+                        cap_height: face.capital_height(),
+                        ideographic_baseline: Some((face.descender() as f32 * 0.8) as i16),
+                        hanging_baseline: Some((face.ascender() as f32 * 0.9) as i16),
+                        mathematical_baseline: face.x_height().map(|x| (x as f32 * 0.5) as i16),
+                        average_char_width: (face.ascender() - face.descender()) as f32 * 0.5,
+                        max_char_width: face.units_per_em() as f32,
+                        underline_position: face.underline_metrics().map(|m| m.position as f32).unwrap_or(-100.0),
+                        underline_thickness: face.underline_metrics().map(|m| m.thickness as f32).unwrap_or(50.0),
+                        strikethrough_position: face.x_height().map(|x| x as f32 * 0.6).unwrap_or(face.ascender() as f32 * 0.4),
+                        strikethrough_thickness: face.underline_metrics().map(|m| m.thickness as f32).unwrap_or(50.0),
+                    });
+                }
+            });
+        
+        result.ok_or_else(|| "Failed to extract font metrics".into())
     }
 }
 
 impl Default for FontMetricsCalculator {
     fn default() -> Self {
-        Self::new().expect("Failed to create FontMetricsCalculator")
+        Self::new().unwrap_or_else(|_| {
+            // Fallback: Use HashMap-based cache when goldylox initialization fails
+            // FontMetricsCache::default() already provides this fallback
+            FontMetricsCalculator {
+                cache: FontMetricsCache::default(),
+            }
+        })
     }
 }

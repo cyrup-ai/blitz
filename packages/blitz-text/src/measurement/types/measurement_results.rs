@@ -41,7 +41,7 @@ impl Default for LineMeasurement {
 }
 
 /// Complete text measurement result
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct TextMeasurement {
     pub content_width: f32,
     pub content_height: f32,
@@ -57,31 +57,10 @@ pub struct TextMeasurement {
     pub line_measurements: Vec<LineMeasurement>,
     pub total_character_count: usize,
     pub baseline_offset: f32,
-    #[serde(skip, default = "std::time::Instant::now")]
-    pub measured_at: std::time::Instant,
+    pub measured_at: u64, // Unix timestamp in milliseconds
 }
 
-impl Default for TextMeasurement {
-    fn default() -> Self {
-        Self {
-            content_width: 0.0,
-            content_height: 0.0,
-            line_height: 0.0,
-            baseline: 0.0,
-            ascent: 0.0,
-            descent: 0.0,
-            line_gap: 0.0,
-            x_height: 0.0,
-            cap_height: 0.0,
-            advance_width: 0.0,
-            bounds: TextBounds::default(),
-            line_measurements: Vec::new(),
-            total_character_count: 0,
-            baseline_offset: 0.0,
-            measured_at: std::time::Instant::now(),
-        }
-    }
-}
+
 
 impl CacheValue for TextMeasurement {
     type Metadata = CacheValueMetadata;

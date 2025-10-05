@@ -1,13 +1,11 @@
 // Copyright © SixtyFPS GmbH <info@slint.dev>
 // SPDX-License-Identifier: MIT
-use std::sync::mpsc::{channel, Receiver, Sender};
-use std::time::Instant;
-
+use crate::Color;
 use anyrender_vello::wgpu_context::DeviceHandle;
 use anyrender_vello::{CustomPaintCtx, CustomPaintSource, TextureHandle};
+use std::sync::mpsc::{channel, Receiver, Sender};
+use std::time::Instant;
 use wgpu::Instance;
-
-use crate::Color;
 
 pub struct DemoPaintSource {
     state: DemoRendererState,
@@ -171,22 +169,33 @@ impl ActiveDemoRenderer {
         height: u32,
         start_time: &Instant,
     ) -> Option<TextureHandle> {
+        println!("🚀 ActiveDemoRenderer::render called! width={}, height={}", width, height);
+        
         // If "next texture" size doesn't match specified size then unregister and drop texture
         if let Some(next) = &self.next_texture {
             if next.texture.width() != width || next.texture.height() != height {
+                println!("🚀 Texture size mismatch, dropping old texture");
                 ctx.unregister_texture(next.handle);
                 self.next_texture = None;
             }
         }
 
         // If there is no "next texture" then create one and register it.
+        // Ensure we have a texture that matches the current size
+        if self.next_texture.is_none() {
+            println!("🚀 Creating new texture {}x{}", width, height);
+            let texture = create_texture(&self.device, width, height);
+            let handle = ctx.register_texture(texture.clone());
+            println!("🚀 Texture created and registered");
+            self.next_texture = Some(TextureAndHandle { texture, handle });
+        }
+        
         let texture_and_handle = match &self.next_texture {
             Some(next) => next,
             None => {
-                let texture = create_texture(&self.device, width, height);
-                let handle = ctx.register_texture(texture.clone());
-                self.next_texture = Some(TextureAndHandle { texture, handle });
-                self.next_texture.as_ref().unwrap()
+                println!("❌ Failed to create texture for demo renderer");
+                log::error!("Failed to create texture for demo renderer");
+                return None;
             }
         };
 
@@ -199,6 +208,9 @@ impl ActiveDemoRenderer {
             light_color_and_time: [light_red, light_green, light_blue, elapsed],
         };
 
+        println!("🚀 Rendering to texture with elapsed time: {}, colors: [{}, {}, {}]", 
+                 elapsed, light_red, light_green, light_blue);
+
         let mut encoder = self
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
@@ -207,12 +219,12 @@ impl ActiveDemoRenderer {
                 label: None,
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view: &next_texture.create_view(&wgpu::TextureViewDescriptor::default()),
+                    depth_slice: None,
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color::GREEN),
                         store: wgpu::StoreOp::Store,
                     },
-                    depth_slice: None,
                 })],
                 depth_stencil_attachment: None,
                 timestamp_writes: None,
@@ -228,8 +240,10 @@ impl ActiveDemoRenderer {
         }
 
         self.queue.submit(Some(encoder.finish()));
+        println!("🚀 WGPU render commands submitted to queue");
 
         std::mem::swap(&mut self.next_texture, &mut self.displayed_texture);
+        println!("✅ ActiveDemoRenderer::render completed, returning handle");
         Some(next_texture_handle)
     }
 }

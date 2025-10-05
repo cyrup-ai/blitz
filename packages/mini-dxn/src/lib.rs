@@ -94,7 +94,7 @@ pub fn launch_cfg(
     // Create the renderer
     #[cfg(feature = "gpu_backend")]
     let renderer = DxnWindowRenderer::with_features_and_limits(features, limits);
-    #[cfg(feature = "cpu_backend")]
+    #[cfg(all(feature = "cpu_backend", not(feature = "gpu_backend")))]
     let renderer = DxnWindowRenderer::new();
 
     // Spin up the virtualdom
@@ -106,6 +106,11 @@ pub fn launch_cfg(
 
     // Create the document and renderer
     let doc = DioxusDocument::new(vdom, net_provider);
+    
+    // Initialize text system with GPU context
+    // Note: This will be called after the renderer is resumed and GPU context is available
+    // For now, we'll set up a callback to initialize it later
+    
     let window = WindowConfig::new(Box::new(doc) as _, renderer);
 
     // Create application

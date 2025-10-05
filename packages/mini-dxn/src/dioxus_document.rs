@@ -46,8 +46,9 @@ impl DioxusDocument {
     pub fn new(vdom: VirtualDom, net_provider: Option<Arc<dyn NetProvider<Resource>>>) -> Self {
         let mut doc = BaseDocument::new(DocumentConfig {
             net_provider,
+            shell_provider: Some(Arc::new(blitz_traits::shell::DummyShellProvider)),
             ..Default::default()
-        });
+        }).expect("Failed to create BaseDocument - invalid configuration");
 
         // Create some minimal HTML to render the app into.
 
@@ -129,7 +130,8 @@ impl Document for DioxusDocument {
         let mut writer = MutationWriter::new(&mut self.inner, &mut self.vdom_state);
         self.vdom.render_immediate(&mut writer);
 
-        true
+        // Only return true if there were actual mutations/changes
+        writer.has_changes()
     }
 }
 

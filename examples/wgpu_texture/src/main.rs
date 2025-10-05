@@ -1,7 +1,6 @@
-use std::env;
-
 use color::{OpaqueColor, Srgb};
 use demo_renderer::{DemoMessage, DemoPaintSource};
+use std::env;
 use wgpu::{Features, Limits};
 
 mod demo_renderer;

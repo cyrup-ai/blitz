@@ -106,7 +106,10 @@ impl BaseDocument {
                         // Get font system for content width calculation
                         let content_sizes = self.with_text_system(|text_system| text_system.with_font_system(|font_system| {
                             inline_layout.calculate_content_widths_with_inline_elements(font_system)
-                        }));
+                        })).unwrap_or_else(|_| {
+                            // If text system is not available, provide reasonable defaults
+                            crate::node::ContentWidths { min: 0.0, max: 0.0 }
+                        });
                         let computed_width = match available_space.width {
                             AvailableSpace::MinContent => content_sizes.min,
                             AvailableSpace::MaxContent => content_sizes.max,
@@ -139,7 +142,7 @@ impl BaseDocument {
                     });
 
                 // Perform inline layout
-                self.with_text_system(|text_system| text_system.with_font_system(|font_system| {
+                let _ = self.with_text_system(|text_system| text_system.with_font_system(|font_system| {
                     inline_layout.break_all_lines(font_system, Some(width));
                 }));
 

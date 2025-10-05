@@ -232,7 +232,7 @@ impl DocumentMutator<'_> {
                 // Update text input value using with_text_and_nodes to avoid borrow conflicts
                 let target_node_id = node_id;
                 let value_clone = value.to_string();
-                self.doc.with_text_and_nodes(|text_system, nodes| {
+                let _ = self.doc.with_text_and_nodes(|text_system, nodes| {
                     text_system.with_font_system(|font_system| {
                         let node = &mut nodes[target_node_id];
                         if let Some(input_data) = node.element_data_mut().and_then(|el| el.text_input_data_mut()) {
@@ -288,11 +288,11 @@ impl DocumentMutator<'_> {
         let has_text_input = element.text_input_data().is_some();
 
         // Drop the element borrow before calling with_text_and_nodes
-        drop(element);
+        let _ = element;
 
         // Update text input value with separate borrow
         if name.local == local_name!("value") && has_text_input {
-            self.doc.with_text_and_nodes(|text_system, nodes| {
+            let _ = self.doc.with_text_and_nodes(|text_system, nodes| {
                 text_system.with_font_system(|font_system| {
                     let node = &mut nodes[node_id];
                     if let Some(input_data) = node.element_data_mut().and_then(|el| el.text_input_data_mut()) {
@@ -677,9 +677,12 @@ impl<'doc> DocumentMutator<'doc> {
     }
 
     fn load_custom_paint_src(&mut self, target_id: usize) {
+        println!("🔧 load_custom_paint_src called for node {}", target_id);
         let node = &mut self.doc.nodes[target_id];
         if let Some(raw_src) = node.attr(local_name!("src")) {
+            println!("🔧 Canvas src attribute value: {}", raw_src);
             if let Ok(custom_paint_source_id) = raw_src.parse::<u64>() {
+                println!("✅ Successfully parsed custom_paint_source_id: {}", custom_paint_source_id);
                 self.recompute_is_animating = true;
                 let canvas_data = SpecialElementData::Canvas(CanvasData {
                     custom_paint_source_id,
@@ -687,6 +690,7 @@ impl<'doc> DocumentMutator<'doc> {
                 match node.element_data_mut() {
                     Some(element_data) => {
                         element_data.special_data = canvas_data;
+                        println!("✅ CanvasData set on element successfully");
                     }
                     None => {
                         eprintln!(
@@ -695,7 +699,11 @@ impl<'doc> DocumentMutator<'doc> {
                         );
                     }
                 }
+            } else {
+                println!("❌ Failed to parse custom_paint_source_id from: {}", raw_src);
             }
+        } else {
+            println!("❌ Canvas element has no src attribute!");
         }
     }
 

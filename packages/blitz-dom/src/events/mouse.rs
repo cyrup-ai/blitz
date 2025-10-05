@@ -57,7 +57,8 @@ pub(crate) fn handle_mousemove(
     let y = (hit.y - content_box_offset.y) as f64 * doc.viewport.scale_f64();
 
     // Use the new API that safely handles both text system and nodes
-    doc.with_text_and_nodes(|text_system, nodes| {
+    // If text system isn't initialized, silently skip text input processing
+    let _ = doc.with_text_and_nodes(|text_system, nodes| {
         text_system.with_font_system(|font_system| {
             let node = &mut nodes[target];
             let Some(el) = node.data.downcast_element_mut() else {
@@ -110,7 +111,8 @@ pub(crate) fn handle_mousedown(doc: &mut BaseDocument, target: usize, x: f32, y:
     let y = (hit.y - content_box_offset.y) as f64 * doc.viewport.scale_f64();
 
     // Use the new API that safely handles both text system and nodes
-    doc.with_text_and_nodes(|text_system, nodes| {
+    // If text system isn't initialized, silently skip text input processing
+    let _ = doc.with_text_and_nodes(|text_system, nodes| {
         text_system.with_font_system(|font_system| {
             let node = &mut nodes[target];
             let Some(el) = node.data.downcast_element_mut() else {

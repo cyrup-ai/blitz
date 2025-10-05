@@ -128,58 +128,50 @@ pub struct TextShaper {
 }
 
 impl TextShaper {
-    /// Create new text shaper with atomic font system access
+    /// Create new text shaper with atomic font system access using global cache
     pub fn new(font_system: FontSystem) -> Result<Self, Box<dyn std::error::Error>> {
         static NEXT_ID: AtomicU64 = AtomicU64::new(1);
+        let shaping_id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
+
+        // Use the global text shaping cache instead of creating a new one
+        let cache = crate::cache::get_text_shaping_cache();
+        
+        println!("✅ TextShaper (shaper/mod.rs) using global Goldylox cache (singleton)");
 
         Ok(Self {
             font_system: Arc::new(ArcSwap::new(Arc::new(font_system))),
             analyzer: TextAnalyzer::new(),
-            cache: GoldyloxBuilder::<String, ShapedText>::new()
-                .hot_tier_max_entries(1000)
-                .hot_tier_memory_limit_mb(64)
-                .warm_tier_max_entries(5000)
-                .warm_tier_max_memory_bytes(256 * 1024 * 1024) // 256MB
-                .cold_tier_max_size_bytes(1024 * 1024 * 1024) // 1GB
-                .compression_level(6)
-                .background_worker_threads(2)
-                .cache_id("text_shaper_cache")
-                .build()
-                .map_err(|e| ShapingError::CacheOperationError(e.to_string()))?,
+            cache: (*cache).clone(), // Clone the Arc to get the underlying Goldylox instance
             ascii_shaper: AsciiShaper::new(),
             run_shaper: RunShaper::new(),
             line_breaker: LineBreaker::new(),
             default_metrics: Metrics::new(16.0, 20.0),
-            shaping_id: NEXT_ID.fetch_add(1, Ordering::Relaxed),
+            shaping_id,
         })
     }
 
-    /// Create shaper with custom configuration
+    /// Create shaper with custom configuration using global cache
     pub fn with_config(
         font_system: FontSystem,
-        cache_memory_mb: usize,
+        _cache_memory_mb: usize, // Ignored since we use global cache
     ) -> Result<Self, ShapingError> {
         static NEXT_ID: AtomicU64 = AtomicU64::new(1);
+        let shaping_id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
+
+        // Use the global text shaping cache instead of creating a new one
+        let cache = crate::cache::get_text_shaping_cache();
+        
+        println!("✅ TextShaper::with_config using global Goldylox cache (singleton)");
 
         Ok(Self {
             font_system: Arc::new(ArcSwap::new(Arc::new(font_system))),
             analyzer: TextAnalyzer::new(),
-            cache: GoldyloxBuilder::<String, ShapedText>::new()
-                .hot_tier_max_entries((cache_memory_mb * 10) as u32) // Scale entries with memory
-                .hot_tier_memory_limit_mb((cache_memory_mb / 4) as u32)
-                .warm_tier_max_entries((cache_memory_mb * 50) as usize)
-                .warm_tier_max_memory_bytes((cache_memory_mb * 1024 * 1024) as u64) // Use provided memory limit
-                .cold_tier_max_size_bytes((cache_memory_mb * 2 * 1024 * 1024) as u64) // 2x memory for cold storage
-                .compression_level(6)
-                .background_worker_threads(2)
-                .cache_id("text_shaper_cache_custom")
-                .build()
-                .map_err(|e| ShapingError::CacheOperationError(e.to_string()))?,
+            cache: (*cache).clone(), // Clone the Arc to get the underlying Goldylox instance
             ascii_shaper: AsciiShaper::new(),
             run_shaper: RunShaper::new(),
             line_breaker: LineBreaker::new(),
             default_metrics: Metrics::new(16.0, 20.0),
-            shaping_id: NEXT_ID.fetch_add(1, Ordering::Relaxed),
+            shaping_id,
         })
     }
 
@@ -416,8 +408,10 @@ impl TextShaper {
             .hash(&mut width_hasher);
         let max_width_hash = width_hasher.finish();
 
-        // Simple feature hash for now
-        let feature_hash = 0;
+        // Hash default feature settings (features vary by script)
+        let mut feature_hasher = DefaultHasher::new();
+        "default_features".hash(&mut feature_hasher);
+        let feature_hash = feature_hasher.finish();
 
         ShapingCacheKey {
             text_hash,

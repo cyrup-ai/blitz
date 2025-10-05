@@ -14,7 +14,9 @@ pub use glyphon::{
 };
 use wgpu::{DepthStencilState, Device, MultisampleState};
 
-use crate::custom_glyphs::{CustomGlyphCache, CustomGlyphError, CustomGlyphRegistry};
+use crate::custom_glyphs::{
+    AtlasProcessor, CustomGlyphCache, CustomGlyphError, CustomGlyphRegistry,
+};
 use crate::gpu::GpuRenderConfig;
 
 /// Enhanced TextRenderer with comprehensive performance monitoring and optimization
@@ -153,17 +155,47 @@ impl EnhancedTextRenderer {
         &self,
         buffer: &Buffer,
     ) -> Result<Vec<CustomGlyph>, CustomGlyphError> {
-        // Lock-free atomic cache access with blazing-fast performance
-        let _cache = self.custom_glyph_cache.load();
+        let mut custom_glyphs = Vec::new();
 
-        // Extract custom glyphs from buffer layout runs
-        let custom_glyphs = Vec::new();
-
+        // Iterate through all layout runs in the buffer
         for run in buffer.layout_runs() {
-            for _glyph in run.glyphs.iter() {
-                // Check if this is a custom glyph (e.g., emoji, symbols)
-                // For now, return empty vec as placeholder until proper glyph detection is implemented
-                // TODO: Implement proper custom glyph detection from buffer layout
+            // Iterate through glyphs in this run
+            for glyph in run.glyphs.iter() {
+                // Extract character(s) from glyph cluster
+                if glyph.start < run.text.len() && glyph.end <= run.text.len() {
+                    let char_range = &run.text[glyph.start..glyph.end];
+
+                    // Get first character (emoji/icons are typically single chars)
+                    if let Some(ch) = char_range.chars().next() {
+                        let codepoint = ch as u32;
+
+                        // Check if this is a custom glyph using existing detection
+                        if AtlasProcessor::is_emoji_codepoint(codepoint)
+                            || AtlasProcessor::is_icon_codepoint(codepoint)
+                        {
+                            // Map codepoint to compact ID using offset-based indexing
+                            let id = if AtlasProcessor::is_emoji_codepoint(codepoint) {
+                                (codepoint - 0x1F600) as u16
+                            } else {
+                                ((codepoint - 0xE000) + 256) as u16
+                            };
+
+                            // Create CustomGlyph for glyphon
+                            let custom_glyph = CustomGlyph {
+                                id,
+                                left: glyph.x,
+                                top: glyph.y,
+                                width: glyph.w,
+                                height: run.line_height,
+                                color: glyph.color_opt.map(|c| Color::rgba(c.r(), c.g(), c.b(), c.a())),
+                                snap_to_physical_pixel: true,
+                                metadata: codepoint as usize,
+                            };
+
+                            custom_glyphs.push(custom_glyph);
+                        }
+                    }
+                }
             }
         }
 

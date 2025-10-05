@@ -49,9 +49,14 @@ fn calculate_selection_rectangles(
                 (x, width)
             };
 
-            // Use line-based metrics (simplified for now)
-            let rect_y = (line_index as f32) * 20.0; // Default line height
-            let rect_height = 20.0; // Default height
+            // Use actual line metrics from shaped runs
+            let line_height = shaped_runs
+                .first()
+                .map(|run| run.height)
+                .unwrap_or(20.0); // Fallback to 20.0 if no runs available
+            
+            let rect_y = (line_index as f32) * line_height;
+            let rect_height = line_height;
 
             rectangles.push(SelectionRectangle {
                 left: rect_x,

@@ -18,7 +18,7 @@ use layers::reset_layer_stats;
 use render::BlitzDomPainter;
 // Re-export screenshot types for public API
 pub use screenshot::{
-    ScreenshotConfig, ScreenshotConfigBuilder, ScreenshotEngine, ScreenshotRequest, ScreenshotStats,
+    ScreenshotConfig, ScreenshotConfigBuilder, ScreenshotEngine, ScreenshotRequest,
 };
 
 /// Paint a [`blitz_dom::BaseDocument`] by pushing drawing commands into

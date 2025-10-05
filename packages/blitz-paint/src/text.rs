@@ -6,11 +6,9 @@ use anyrender::PaintScene;
 use blitz_dom::node::TextBrush;
 use blitz_text::{Attrs, Buffer};
 use kurbo::{Affine, Point};
+use log;
 use peniko::Fill;
 use style::properties::ComputedValues;
-// Production-grade stylo text decoration imports
-#[cfg(feature = "gecko")]
-use style::properties::longhands::text_decoration_thickness::computed_value::T as TextDecorationThickness;
 
 use crate::color::ToColorColor;
 
@@ -33,17 +31,15 @@ fn ensure_text_shaper_initialized() {
                 Ok(text_shaper) => {
                     *shaper_ref = Some(text_shaper);
                 }
-                Err(_e) => {
-                    #[cfg(feature = "tracing")]
-                    tracing::error!("Failed to create TextShaper: {:?}, using fallback", e);
+                Err(e) => {
+                    log::error!("Failed to create TextShaper: {:?}, using fallback", e);
 
                     // Graceful degradation: try with minimal font system
                     let minimal_font_system = blitz_text::FontSystem::new();
                     if let Ok(fallback_shaper) = blitz_text::TextShaper::new(minimal_font_system) {
                         *shaper_ref = Some(fallback_shaper);
                     } else {
-                        #[cfg(feature = "tracing")]
-                        tracing::error!("Complete TextShaper initialization failure, text rendering may be degraded");
+                        log::error!("Complete TextShaper initialization failure, text rendering may be degraded");
                     }
                 }
             }
@@ -61,6 +57,7 @@ pub(crate) fn render_text_buffer(
     computed_styles: Option<&ComputedValues>,
     default_brush: &TextBrush,
 ) {
+    println!("🎯 BLITZ-PAINT render_text_buffer called at pos: ({}, {}), scale: {}", pos.x, pos.y, scale);
     #[cfg(feature = "tracing")]
     tracing::debug!(
         "render_text_buffer called at pos: ({}, {}), scale: {}",
@@ -226,27 +223,8 @@ fn extract_text_decoration(
     // Extract text decoration thickness from stylo (Gecko engine supports this)
     let font = styles.get_font();
     let font_size = font.font_size.computed_size.px();
-    let thickness = {
-        // Try to extract real text_decoration_thickness if available (Gecko)
-        #[cfg(feature = "gecko")]
-        {
-            use style::properties::longhands::text_decoration_thickness::computed_value::T as TextDecorationThickness;
-            match &text_styles.text_decoration_thickness {
-                TextDecorationThickness::Auto => (font_size / 14.0).max(1.0),
-                TextDecorationThickness::LengthPercentage(lp) => lp
-                    .resolve(style::values::computed::Length::new(font_size), || {
-                        font_size
-                    })
-                    .px()
-                    .max(0.5),
-            }
-        }
-        #[cfg(not(feature = "gecko"))]
-        {
-            // Fallback calculation for non-Gecko builds
-            (font_size / 14.0).max(1.0)
-        }
-    };
+    // Fallback calculation for text decoration thickness
+    let thickness = (font_size / 14.0).max(1.0);
 
     Some(TextDecorationParams {
         line: line_types,
@@ -886,7 +864,7 @@ pub(crate) fn shape_text_advanced(
         let mut shaper = shaper.borrow_mut();
         match shaper.as_mut() {
             Some(shaper) => {
-                shaper.shape_text(text, attrs, max_width).or_else(|_e| {
+                shaper.shape_text(text, attrs, max_width).or_else(|e| {
                     #[cfg(feature = "tracing")]
                     tracing::warn!("Text shaping failed: {:?}, attempting graceful fallback", e);
 

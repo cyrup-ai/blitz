@@ -1,6 +1,7 @@
 //! Enhanced measurement core using goldylox multi-tier caching
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
 
 use cosmyc_text::fontdb;
@@ -9,6 +10,15 @@ use goldylox::{Goldylox, GoldyloxBuilder};
 use serde::{Deserialize, Serialize};
 
 use crate::measurement::types::*;
+
+// Statistics tracking (atomic counters for lock-free stats)
+static CACHE_HITS: AtomicUsize = AtomicUsize::new(0);
+static CACHE_MISSES: AtomicUsize = AtomicUsize::new(0);
+static TOTAL_MEASUREMENTS: AtomicUsize = AtomicUsize::new(0);
+static FONT_METRICS_CACHE_HITS: AtomicUsize = AtomicUsize::new(0);
+static FONT_METRICS_CACHE_MISSES: AtomicUsize = AtomicUsize::new(0);
+static BASELINE_CACHE_HITS: AtomicUsize = AtomicUsize::new(0);
+static BASELINE_CACHE_MISSES: AtomicUsize = AtomicUsize::new(0);
 
 /// Enhanced measurement cache key
 #[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Default)]
@@ -95,41 +105,13 @@ impl EnhancedMeasurementCore {
 
 impl EnhancedMeasurementCore {
     pub fn new() -> Result<Self, Box<dyn std::error::Error>> {
-        // Try to create Goldylox cache with proper error handling and fallback
-        let cache_type = match GoldyloxBuilder::<String, TextMeasurement>::new()
-            .hot_tier_max_entries(1000)
-            .hot_tier_memory_limit_mb(64)
-            .warm_tier_max_entries(4000)
-            .warm_tier_max_memory_bytes(128 * 1024 * 1024) // 128MB
-            .cold_tier_max_size_bytes(256 * 1024 * 1024) // 256MB
-            .compression_level(6)
-            .background_worker_threads(2)
-            .cache_id("enhanced_measurement_core")
-            .build() {
-                Ok(cache) => {
-                    println!("Successfully initialized Goldylox enhanced measurement cache");
-                    CacheType::Goldylox(cache)
-                },
-                Err(e) => {
-                    eprintln!("Warning: Failed to initialize Goldylox measurement cache: {}. Trying minimal configuration...", e);
-                    // Try a minimal cache configuration that should work on any system
-                    match GoldyloxBuilder::<String, TextMeasurement>::new()
-                        .hot_tier_max_entries(100)
-                        .hot_tier_memory_limit_mb(8)
-                        .cache_id("measurement_fallback")
-                        .build() {
-                            Ok(fallback_cache) => {
-                                println!("Successfully initialized minimal Goldylox measurement cache");
-                                CacheType::Goldylox(fallback_cache)
-                            },
-                            Err(fallback_err) => {
-                                eprintln!("Warning: Both Goldylox measurement cache attempts failed: primary={}, fallback={}. Using HashMap fallback.", e, fallback_err);
-                                // Final fallback: simple HashMap-based cache
-                                CacheType::HashMap(Mutex::new(HashMap::new()))
-                            }
-                        }
-                }
-            };
+        // Use the global text measurement cache instead of creating a new one
+        let cache = crate::cache::get_text_measurement_cache();
+        
+        println!("✅ EnhancedMeasurementCore using global Goldylox cache (singleton)");
+        
+        // Always use the global cache - no fallback needed since it's already initialized
+        let cache_type = CacheType::Goldylox((*cache).clone());
 
         Ok(Self { cache_type })
     }
@@ -148,8 +130,13 @@ impl EnhancedMeasurementCore {
 
         // Check cache based on cache type
         if let Some(cached) = self.get(&string_key) {
+            CACHE_HITS.fetch_add(1, Ordering::Relaxed);
             return Ok(cached);
         }
+
+        // Cache miss - increment counter
+        CACHE_MISSES.fetch_add(1, Ordering::Relaxed);
+        TOTAL_MEASUREMENTS.fetch_add(1, Ordering::Relaxed);
 
         // Simplified measurement - real implementation would use proper text shaping
         let measurement = TextMeasurement {
@@ -167,7 +154,10 @@ impl EnhancedMeasurementCore {
             line_measurements: vec![],
             total_character_count: request.text.len(),
             baseline_offset: 0.0,
-            measured_at: std::time::Instant::now(),
+            measured_at: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis() as u64,
         };
 
         // Store in cache
@@ -290,21 +280,33 @@ impl EnhancedTextMeasurer {
 
     /// Get measurement statistics
     pub fn get_stats(&self) -> crate::measurement::types::statistics::MeasurementStats {
-        // Return default stats for now
         use crate::measurement::types::statistics::MeasurementStats;
+        
+        let cache_hits = CACHE_HITS.load(Ordering::Relaxed);
+        let cache_misses = CACHE_MISSES.load(Ordering::Relaxed);
+        let total = cache_hits + cache_misses;
+        
+        let font_metrics_hits = FONT_METRICS_CACHE_HITS.load(Ordering::Relaxed);
+        let font_metrics_misses = FONT_METRICS_CACHE_MISSES.load(Ordering::Relaxed);
+        let font_metrics_total = font_metrics_hits + font_metrics_misses;
+        
+        let baseline_hits = BASELINE_CACHE_HITS.load(Ordering::Relaxed);
+        let baseline_misses = BASELINE_CACHE_MISSES.load(Ordering::Relaxed);
+        let baseline_total = baseline_hits + baseline_misses;
+        
         MeasurementStats {
-            cache_hits: 0,
-            cache_misses: 0,
-            total_measurements: 0,
-            font_metrics_cache_hits: 0,
-            font_metrics_cache_misses: 0,
-            baseline_cache_hits: 0,
-            baseline_cache_misses: 0,
-            evictions: 0,
-            current_cache_size: 0,
-            hit_rate: 0.0,
-            font_metrics_hit_rate: 0.0,
-            baseline_hit_rate: 0.0,
+            cache_hits,
+            cache_misses,
+            total_measurements: TOTAL_MEASUREMENTS.load(Ordering::Relaxed),
+            font_metrics_cache_hits: font_metrics_hits,
+            font_metrics_cache_misses: font_metrics_misses,
+            baseline_cache_hits: baseline_hits,
+            baseline_cache_misses: baseline_misses,
+            evictions: 0, // Goldylox manages this internally
+            current_cache_size: 0, // Can query from cache if needed
+            hit_rate: if total > 0 { cache_hits as f32 / total as f32 } else { 0.0 },
+            font_metrics_hit_rate: if font_metrics_total > 0 { font_metrics_hits as f32 / font_metrics_total as f32 } else { 0.0 },
+            baseline_hit_rate: if baseline_total > 0 { baseline_hits as f32 / baseline_total as f32 } else { 0.0 },
         }
     }
 }

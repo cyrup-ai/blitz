@@ -247,7 +247,7 @@ mod cursor_detection_integration_tests {
         // Test cursor fallback behavior patterns
         let default_cursor = CursorIcon::Default;
         let text_cursor = CursorIcon::Text;
-        let pointer_cursor = CursorIcon::Pointer;
+        let _pointer_cursor = CursorIcon::Pointer;
         
         // Simulate cursor detection fallback logic
         let detected_cursor = if default_cursor != CursorIcon::Default {

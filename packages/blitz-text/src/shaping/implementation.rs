@@ -29,24 +29,17 @@ impl TextShaper {
 }
 
 impl TextShaper {
-    /// Create new text shaper with optimized defaults
+    /// Create new text shaper with optimized defaults using global cache
     pub fn new(font_system: Arc<parking_lot::RwLock<FontSystem>>) -> Result<Self, ShapingError> {
-        let cache = GoldyloxBuilder::<String, ShapedText>::new()
-            .hot_tier_max_entries(1000)
-            .hot_tier_memory_limit_mb(64)
-            .warm_tier_max_entries(5000)
-            .warm_tier_max_memory_bytes(256 * 1024 * 1024) // 256MB
-            .cold_tier_max_size_bytes(1024 * 1024 * 1024) // 1GB
-            .compression_level(6)
-            .background_worker_threads(2)
-            .cache_id("text_shaper_cache")
-            .build()
-            .map_err(|e| ShapingError::CacheInitializationError(format!("{:?}", e)))?;
+        // Use the global text shaping cache instead of creating a new one
+        let cache = crate::cache::get_text_shaping_cache();
+        
+        println!("✅ TextShaper using global Goldylox cache (singleton)");
 
         Ok(Self {
             font_system,
             feature_settings: HashMap::new(), // Features now accessed via get_script_features()
-            cache,
+            cache: (*cache).clone(), // Clone the Arc to get the underlying Goldylox instance
         })
     }
 

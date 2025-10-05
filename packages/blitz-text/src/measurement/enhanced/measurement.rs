@@ -147,7 +147,10 @@ impl EnhancedTextMeasurer {
             line_measurements,
             total_character_count,
             baseline_offset: 0.0, // Calculated from first line
-            measured_at: std::time::Instant::now(),
+            measured_at: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis() as u64,
 
             // Enhanced measurements
             font_metrics,

@@ -13,7 +13,8 @@ mod snapshot_tests {
     fn test_snapshot_update_existing() {
         // Test updating existing snapshot with state changes
         let config = DocumentConfig::for_testing();
-        let mut doc = BaseDocument::new(config);
+        let mut doc = BaseDocument::new(config)
+            .expect("Failed to create test document");
         
         let test_node_id = 0; // Use root node
         
@@ -69,7 +70,8 @@ mod snapshot_tests {
     fn test_invalidation_types() {
         // Test all invalidation types trigger proper updates
         let config = DocumentConfig::for_testing();
-        let mut doc = BaseDocument::new(config);
+        let mut doc = BaseDocument::new(config)
+            .expect("Failed to create test document");
         
         let test_node_id = 0; // Use root node
         

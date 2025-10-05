@@ -116,14 +116,33 @@ impl<D: 'static> NetProvider<D> for Provider<D> {
     fn fetch(&self, doc_id: usize, request: Request, handler: BoxedHandler<D>) {
         let client = self.client.clone();
         let callback = Arc::clone(&self.resource_callback);
-        println!("Fetching {}", &request.url);
+        
+        #[cfg(feature = "tracing")]
+        tracing::debug!("Fetching {}", &request.url);
+        
         self.rt.spawn(async move {
             let url = request.url.to_string();
-            let res = Self::fetch_with_handler(client, doc_id, request, handler, callback).await;
+            let res = Self::fetch_with_handler(client, doc_id, request, handler, callback.clone()).await;
+            
             if let Err(e) = res {
-                eprintln!("Error fetching {url}: {e:?}");
+                // Structured logging with context
+                #[cfg(feature = "tracing")]
+                tracing::error!(
+                    url = %url,
+                    doc_id = doc_id,
+                    error = %e,
+                    "Network fetch failed"
+                );
+                
+                #[cfg(not(feature = "tracing"))]
+                eprintln!("Error fetching {url}: {e}");
+                
+                // Propagate error to callback consumers
+                let error_msg = format!("Failed to fetch {}: {}", url, e);
+                callback.call(doc_id, Err(Some(error_msg)));
             } else {
-                println!("Success {url}");
+                #[cfg(feature = "tracing")]
+                tracing::debug!("Success {}", url);
             }
         });
     }
@@ -161,18 +180,52 @@ impl From<reqwest::Error> for ProviderError {
     }
 }
 
-pub struct MpscCallback<T>(UnboundedSender<(usize, T)>);
+impl std::fmt::Display for ProviderError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Io(e) => write!(f, "I/O error: {}", e),
+            Self::DataUrl(e) => write!(f, "Data URL parsing error: {}", e),
+            Self::DataUrlBase64(e) => write!(f, "Base64 decode error: {}", e),
+            Self::ReqwestError(e) => write!(f, "HTTP request error: {}", e),
+        }
+    }
+}
+
+impl std::error::Error for ProviderError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Io(e) => Some(e),
+            Self::ReqwestError(e) => Some(e),
+            _ => None,
+        }
+    }
+}
+
+pub struct MpscCallback<T>(UnboundedSender<(usize, Result<T, String>)>);
 impl<T> MpscCallback<T> {
-    pub fn new() -> (UnboundedReceiver<(usize, T)>, Self) {
+    pub fn new() -> (UnboundedReceiver<(usize, Result<T, String>)>, Self) {
         let (send, recv) = unbounded_channel();
         (recv, Self(send))
     }
 }
+
 impl<T: Send + Sync + 'static> NetCallback<T> for MpscCallback<T> {
     fn call(&self, doc_id: usize, result: Result<T, Option<String>>) {
-        // TODO: handle error case
-        if let Ok(data) = result {
-            let _ = self.0.send((doc_id, data));
+        // Convert Option<String> error to String for channel
+        let result_to_send = result.map_err(|opt_err| {
+            opt_err.unwrap_or_else(|| "Unknown network error".to_string())
+        });
+        
+        if let Err(e) = self.0.send((doc_id, result_to_send)) {
+            #[cfg(feature = "tracing")]
+            tracing::error!(
+                doc_id = doc_id,
+                error = ?e,
+                "Failed to send network result through channel"
+            );
+            
+            #[cfg(not(feature = "tracing"))]
+            eprintln!("Failed to send network result for doc {doc_id}: {e:?}");
         }
     }
 }

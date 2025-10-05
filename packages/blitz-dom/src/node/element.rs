@@ -836,7 +836,11 @@ mod background_image_tests {
 
     #[test]
     fn test_background_image_url_creation() {
-        let url: ServoArc<Url> = ServoArc::new("https://example.com/image.png".parse().unwrap());
+        let url: ServoArc<Url> = ServoArc::new(
+            "https://example.com/image.png"
+                .parse()
+                .expect("Failed to parse URL for background image test")
+        );
         let bg_data = BackgroundImageData::new(url.clone());
 
         // Should be URL type

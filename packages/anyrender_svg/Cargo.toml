@@ -30,3 +30,6 @@ path = "../anyrender"
 version = "0.25.8"
 default-features = false
 optional = true
+
+[dev-dependencies.blitz-text]
+path = "../blitz-text"

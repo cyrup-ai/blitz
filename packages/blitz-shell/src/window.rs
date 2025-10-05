@@ -164,19 +164,27 @@ impl<Rend: WindowRenderer> View<Rend> {
 }
 
 impl<Rend: WindowRenderer> View<Rend> {
-    pub fn resume(&mut self) {
-        // Resolve dom
-        self.doc.resolve();
-
-        // Resume renderer
+    pub fn resume(&mut self) -> Result<(), String> {
+        println!("🪟 View::resume() called for window {:?}", self.window.id());
+        
+        // STEP 1: Resume renderer first to get GPU context
         let (width, height) = self.doc.viewport().window_size;
         let scale = self.doc.viewport().scale_f64();
         self.renderer.resume(self.window.clone(), width, height);
         if !self.renderer.is_active() {
-            panic!("Renderer failed to resume");
-        };
+            return Err("Renderer failed to resume - GPU context unavailable".to_string());
+        }
 
-        // Render
+        // STEP 2: Initialize text system with GPU context - MUST happen before layout
+        let doc_as_any: &dyn std::any::Any = &**self.doc;
+        if let Err(e) = self.renderer.initialize_text_system(doc_as_any) {
+            return Err(format!("Text system initialization failed: {}", e));
+        }
+
+        // STEP 3: Now resolve DOM - this triggers layout which needs text system
+        self.doc.resolve();
+
+        // STEP 4: Perform initial render
         println!(
             "🚀 Window::resume() - calling initial render with size {}x{}",
             width, height
@@ -189,6 +197,8 @@ impl<Rend: WindowRenderer> View<Rend> {
 
         // Set waker
         self.waker = Some(create_waker(&self.event_loop_proxy, self.window_id()));
+        
+        Ok(())
     }
 
     pub fn suspend(&mut self) {

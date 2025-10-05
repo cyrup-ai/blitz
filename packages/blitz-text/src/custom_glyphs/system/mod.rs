@@ -11,4 +11,7 @@ mod utilities;
 pub use core::CustomGlyphSystem;
 
 pub use cache::CustomGlyphCache;
-pub use utilities::{convert_cosmyc_color_to_glyphon, hash_color_key, rasterize_custom_glyph};
+pub use utilities::{
+    codepoint_to_compact_id, compact_id_to_codepoint, convert_cosmyc_color_to_glyphon,
+    hash_color_key, rasterize_custom_glyph,
+};

@@ -21,26 +21,6 @@ static CACHED_EMOJI_ATLAS: OnceLock<AtlasMetadata> = OnceLock::new();
 /// Cached decoded icon atlas image (decoded once at first access)
 static CACHED_ICON_ATLAS: OnceLock<AtlasMetadata> = OnceLock::new();
 
-/// Emoji atlas metadata - covers emoticons range 0x1F600-0x1F64F (80 glyphs)
-const EMOJI_ATLAS_METADATA: AtlasMetadata = AtlasMetadata {
-    width: 512,
-    height: 320,
-    glyph_width: 32,
-    glyph_height: 32,
-    glyphs_per_row: 16,
-    rows: 10,
-};
-
-/// Icon atlas metadata - covers private use range 0xE000-0xE0FF (256 glyphs)
-const ICON_ATLAS_METADATA: AtlasMetadata = AtlasMetadata {
-    width: 512,
-    height: 512,
-    glyph_width: 32,
-    glyph_height: 32,
-    glyphs_per_row: 16,
-    rows: 16,
-};
-
 /// Calculate atlas coordinates from Unicode codepoint for emoji range
 #[inline(always)]
 fn calculate_emoji_atlas_coords(codepoint: u32) -> Option<(u32, u32, u32, u32)> {
@@ -48,23 +28,19 @@ fn calculate_emoji_atlas_coords(codepoint: u32) -> Option<(u32, u32, u32, u32)> 
         return None;
     }
 
+    let atlas = get_cached_emoji_atlas();
     let index = codepoint - 0x1F600;
-    let row = index / EMOJI_ATLAS_METADATA.glyphs_per_row;
-    let col = index % EMOJI_ATLAS_METADATA.glyphs_per_row;
+    let row = index / atlas.glyphs_per_row;
+    let col = index % atlas.glyphs_per_row;
 
-    if row >= EMOJI_ATLAS_METADATA.rows {
+    if row >= atlas.rows {
         return None;
     }
 
-    let x = col * EMOJI_ATLAS_METADATA.glyph_width;
-    let y = row * EMOJI_ATLAS_METADATA.glyph_height;
+    let x = col * atlas.glyph_width;
+    let y = row * atlas.glyph_height;
 
-    Some((
-        x,
-        y,
-        EMOJI_ATLAS_METADATA.glyph_width,
-        EMOJI_ATLAS_METADATA.glyph_height,
-    ))
+    Some((x, y, atlas.glyph_width, atlas.glyph_height))
 }
 
 /// Calculate atlas coordinates from Unicode codepoint for private use range
@@ -74,32 +50,29 @@ fn calculate_icon_atlas_coords(codepoint: u32) -> Option<(u32, u32, u32, u32)> {
         return None;
     }
 
+    let atlas = get_cached_icon_atlas();
     let index = codepoint - 0xE000;
-    let row = index / ICON_ATLAS_METADATA.glyphs_per_row;
-    let col = index % ICON_ATLAS_METADATA.glyphs_per_row;
+    let row = index / atlas.glyphs_per_row;
+    let col = index % atlas.glyphs_per_row;
 
-    if row >= ICON_ATLAS_METADATA.rows {
+    if row >= atlas.rows {
         return None;
     }
 
-    let x = col * ICON_ATLAS_METADATA.glyph_width;
-    let y = row * ICON_ATLAS_METADATA.glyph_height;
+    let x = col * atlas.glyph_width;
+    let y = row * atlas.glyph_height;
 
-    Some((
-        x,
-        y,
-        ICON_ATLAS_METADATA.glyph_width,
-        ICON_ATLAS_METADATA.glyph_height,
-    ))
+    Some((x, y, atlas.glyph_width, atlas.glyph_height))
 }
 
 /// Get cached emoji atlas metadata
 #[inline]
 fn get_cached_emoji_atlas() -> &'static AtlasMetadata {
     CACHED_EMOJI_ATLAS.get_or_init(|| {
-        // In a real implementation, this would decode the PNG and extract metadata
-        // For now, we return the static metadata
-        EMOJI_ATLAS_METADATA
+        // Decode PNG to get real dimensions
+        image::load_from_memory_with_format(EMOJI_ATLAS_DATA, ImageFormat::Png)
+            .map(|img| AtlasMetadata::new(img.width(), img.height(), 32, 32))
+            .unwrap_or_else(|_| AtlasMetadata::default())
     })
 }
 
@@ -107,9 +80,10 @@ fn get_cached_emoji_atlas() -> &'static AtlasMetadata {
 #[inline]
 fn get_cached_icon_atlas() -> &'static AtlasMetadata {
     CACHED_ICON_ATLAS.get_or_init(|| {
-        // In a real implementation, this would decode the PNG and extract metadata
-        // For now, we return the static metadata
-        ICON_ATLAS_METADATA
+        // Decode PNG to get real dimensions
+        image::load_from_memory_with_format(ICON_ATLAS_DATA, ImageFormat::Png)
+            .map(|img| AtlasMetadata::new(img.width(), img.height(), 32, 32))
+            .unwrap_or_else(|_| AtlasMetadata::default())
     })
 }
 

@@ -20,20 +20,16 @@ impl CacheManager {
 }
 
 impl CacheManager {
-    /// Create a new measurement cache manager
+    /// Create a new measurement cache manager using global cache
     pub fn new() -> Result<Self, Box<dyn std::error::Error>> {
-        let cache = GoldyloxBuilder::<String, TextMeasurement>::new()
-            .hot_tier_max_entries(4000)
-            .hot_tier_memory_limit_mb(64)
-            .warm_tier_max_entries(20000)
-            .warm_tier_max_memory_bytes(128 * 1024 * 1024) // 128MB
-            .cold_tier_max_size_bytes(512 * 1024 * 1024) // 512MB
-            .compression_level(6)
-            .background_worker_threads(4)
-            .cache_id("text_measurement_cache")
-            .build()?;
+        // Use the global text measurement cache instead of creating a new one
+        let cache = crate::cache::get_text_measurement_cache();
+        
+        println!("✅ CacheManager using global Goldylox cache (singleton)");
 
-        Ok(Self { cache })
+        Ok(Self { 
+            cache: (*cache).clone() // Clone the Arc to get the underlying Goldylox instance
+        })
     }
 
     /// Get cached measurement result
@@ -163,7 +159,26 @@ impl CacheManager {
 
     /// Check if result should be cached
     pub fn should_cache<T>(&self, _item: &T) -> bool {
-        true // For now, cache everything
+        // Cache eligibility heuristics:
+        // 1. Check item size (Goldylox handles size estimation via CacheValue trait)
+        // 2. Very small items might not benefit from caching overhead
+        // 3. Goldylox's built-in priority and eviction handles most optimization
+        // 4. Main concern: avoid caching truly ephemeral data
+        
+        let estimated_size = std::mem::size_of::<T>();
+        
+        // Don't cache very small items (< 16 bytes) - overhead not worth it
+        if estimated_size < 16 {
+            return false;
+        }
+        
+        // Don't cache extremely large items (> 1MB) - they'll dominate cache
+        if estimated_size > 1024 * 1024 {
+            return false;
+        }
+        
+        // Everything else is cacheable - Goldylox priority system handles optimization
+        true
     }
 
     /// Optimize cache performance
@@ -214,8 +229,7 @@ pub struct CacheStatistics {
     pub memory_usage: CacheMemoryUsage,
 }
 
-/// Unified cache manager for measurement operations
-pub type UnifiedCacheManager = CacheManager;
+
 
 /// Cache types module for measurement operations
 pub mod types {
@@ -233,5 +247,57 @@ pub mod types {
         Miss,
         Error,
         Partial,
+    }
+}
+
+/// Unified cache manager aggregating all blitz-text cache types
+pub struct UnifiedCacheManager {
+    pub measurement_cache: CacheManager,
+    pub font_metrics_cache: crate::measurement::enhanced::font_metrics::FontMetricsCache,
+    pub bidi_cache: crate::bidi::cache::BidiCache,
+    pub features_cache: crate::features::cache::FeaturesCache,
+}
+
+impl UnifiedCacheManager {
+    pub fn new() -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+        Ok(Self {
+            measurement_cache: CacheManager::new().map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { 
+                Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
+            })?,
+            font_metrics_cache: crate::measurement::enhanced::font_metrics::FontMetricsCache::new().map_err(|e| -> Box<dyn std::error::Error + Send + Sync> {
+                Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
+            })?,
+            bidi_cache: crate::bidi::cache::BidiCache::new().map_err(|e| -> Box<dyn std::error::Error + Send + Sync> {
+                Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
+            })?,
+            features_cache: crate::features::cache::FeaturesCache::new().map_err(|e| -> Box<dyn std::error::Error + Send + Sync> {
+                Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
+            })?,
+        })
+    }
+
+    // Delegation methods for measurement cache
+    pub fn get_measurement<K, V>(&self, key: &K) -> Option<V> {
+        self.measurement_cache.get_measurement(key)
+    }
+
+    pub fn cache_measurement<K, V>(&self, key: K, value: V) {
+        self.measurement_cache.cache_measurement(key, value)
+    }
+
+    pub fn get_font_metrics<K, V>(&self, key: &K) -> Option<V> {
+        self.measurement_cache.get_font_metrics(key)
+    }
+
+    pub fn cache_font_metrics<K, V>(&self, key: K, value: V) {
+        self.measurement_cache.cache_font_metrics(key, value)
+    }
+
+    pub fn get_baseline<K, V>(&self, key: &K) -> Option<V> {
+        self.measurement_cache.get_baseline(key)
+    }
+
+    pub fn cache_baseline<K, V>(&self, key: K, value: V) {
+        self.measurement_cache.cache_baseline(key, value)
     }
 }

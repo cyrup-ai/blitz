@@ -5,20 +5,32 @@
 
 use std::sync::atomic::Ordering;
 
+use cosmyc_text::Edit;
+
 use super::types::{EditorStats, EnhancedEditor};
 
 impl<'buffer> EnhancedEditor<'buffer> {
     /// Undo last change
     pub fn undo(&mut self) -> bool {
         if let Some(mut change) = self.undo_stack.pop() {
+            // Set flag to prevent re-adding to undo stack
+            self.applying_change = true;
+            
             // Reverse the change
             change.reverse();
 
-            // Apply reversed change (clone to avoid move)
-            self.apply_change(change.clone());
+            // Apply reversed change
+            self.apply_change(&change);
 
+            // Reverse back for redo
+            change.reverse();
+            
             // Add to redo stack
             self.redo_stack.push(change);
+            
+            // Clear flag
+            self.applying_change = false;
+            
             self.undo_operations.fetch_add(1, Ordering::Relaxed);
             true
         } else {
@@ -28,15 +40,19 @@ impl<'buffer> EnhancedEditor<'buffer> {
 
     /// Redo last undone change
     pub fn redo(&mut self) -> bool {
-        if let Some(mut change) = self.redo_stack.pop() {
-            // Reverse the change back to original
-            change.reverse();
-
-            // Apply change (clone to avoid move)
-            self.apply_change(change.clone());
+        if let Some(change) = self.redo_stack.pop() {
+            // Set flag to prevent re-adding to undo stack
+            self.applying_change = true;
+            
+            // Apply change
+            self.apply_change(&change);
 
             // Add back to undo stack
             self.undo_stack.push(change);
+            
+            // Clear flag
+            self.applying_change = false;
+            
             self.redo_operations.fetch_add(1, Ordering::Relaxed);
             true
         } else {

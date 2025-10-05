@@ -3,6 +3,8 @@
 //! This module handles text wrapping functionality and extraction of shaped runs
 //! for specific lines in multi-line BiDi text processing.
 
+use cosmyc_text::{FontSystem, Metrics};
+
 use super::super::types::{BidiError, BidiRenderOptions, ProcessedBidi};
 use crate::types::ShapedRun;
 
@@ -21,8 +23,10 @@ impl TextWrapper {
         text: &str,
         options: &BidiRenderOptions,
         shaped_runs: &[ShapedRun],
+        font_system: &mut FontSystem,
+        metrics: Metrics,
     ) -> Result<Vec<(ProcessedBidi, Vec<ShapedRun>)>, BidiError> {
-        let multiline_result = processor.process_multiline_bidi_text(text, options)?;
+        let multiline_result = processor.process_multiline_bidi_text(text, options, font_system, metrics)?;
         let mut wrapped_lines = Vec::new();
 
         for paragraph in &multiline_result.paragraphs {

@@ -38,13 +38,13 @@ pub(crate) fn handle_ime_event(doc: &mut BaseDocument, event: BlitzImeEvent) {
                     let mut state = state.borrow_mut();
                     if let Some(composition) = state.remove(&node_id) {
                         // Use with_text_and_nodes to avoid borrow conflicts
-                        doc.with_text_and_nodes(|text_system, nodes| {
+                        let _ = doc.with_text_and_nodes(|text_system, nodes| {
                             text_system.with_font_system(|font_system| {
                                 let node = &mut nodes[node_id];
                                 if let Some(input_data) = node.data.downcast_element_mut()
                                     .and_then(|el| el.text_input_data_mut()) {
                                     let editor = &mut input_data.editor;
-                                    
+
                                     // Clear existing preedit text by selecting and deleting it
                                     let preedit_end = composition.preedit_start + composition.preedit_text.len();
                                     editor.set_cursor(Cursor::new(0, composition.preedit_start));
@@ -78,13 +78,13 @@ pub(crate) fn handle_ime_event(doc: &mut BaseDocument, event: BlitzImeEvent) {
                         let mut state = state.borrow_mut();
                         if let Some(composition) = state.remove(&node_id) {
                             // Use with_text_and_nodes to avoid borrow conflicts
-                            doc.with_text_and_nodes(|text_system, nodes| {
+                            let _ = doc.with_text_and_nodes(|text_system, nodes| {
                                 text_system.with_font_system(|font_system| {
                                     let node = &mut nodes[node_id];
                                     if let Some(input_data) = node.data.downcast_element_mut()
                                         .and_then(|el| el.text_input_data_mut()) {
                                         let editor = &mut input_data.editor;
-                                        
+
                                         // Replace preedit text with committed text
                                         let preedit_end = composition.preedit_start + composition.preedit_text.len();
                                         editor.set_cursor(Cursor::new(0, composition.preedit_start));
@@ -125,13 +125,13 @@ pub(crate) fn handle_ime_event(doc: &mut BaseDocument, event: BlitzImeEvent) {
                             state.remove(&node_id);
                         } else {
                             // Use with_text_and_nodes to avoid borrow conflicts
-                            doc.with_text_and_nodes(|text_system, nodes| {
+                            let _ = doc.with_text_and_nodes(|text_system, nodes| {
                                 text_system.with_font_system(|font_system| {
                                     let node = &mut nodes[node_id];
                                     if let Some(input_data) = node.data.downcast_element_mut()
                                         .and_then(|el| el.text_input_data_mut()) {
                                         let editor = &mut input_data.editor;
-                                        
+
                                         // Clear any existing preedit text
                                         if let Some(composition) = state.get(&node_id) {
                                             let preedit_end = composition.preedit_start + composition.preedit_text.len();
@@ -175,7 +175,7 @@ pub(crate) fn handle_ime_event(doc: &mut BaseDocument, event: BlitzImeEvent) {
                                                 preedit_cursor: cursor,
                                             },
                                         );
-                                        
+
                                         // Ensure text is properly shaped after composition changes
                                         editor.shape_as_needed(font_system, false);
                                     }

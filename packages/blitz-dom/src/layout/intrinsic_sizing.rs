@@ -104,7 +104,10 @@ fn measure_text_content_intrinsic_size(
             // Use new method that includes inline elements for correct CSS compliance
             let content_sizes = tree.with_text_system(|text_system| text_system.with_font_system(|font_system| {
                 inline_layout.calculate_content_widths_with_inline_elements(font_system)
-            }));
+            })).unwrap_or_else(|_| {
+                // If text system is not available, provide reasonable defaults
+                crate::node::ContentWidths { min: 0.0, max: 0.0 }
+            });
 
             // Apply Taffy's AvailableSpace pattern for intrinsic sizing
             let width = match inputs.available_space.width {
@@ -130,12 +133,14 @@ fn measure_text_content_intrinsic_size(
         TextCollapseMode::Collapse,
     );
 
-    // Use text system for measurement (implement based on existing patterns)
-    estimate_text_size(&text_content, inputs)
+    // Use text system for measurement with proper font metrics
+    estimate_text_size(tree, item_id, &text_content, inputs)
 }
 
-/// Estimate text size for collected text content
+/// Estimate text size for collected text content using proper font metrics
 fn estimate_text_size(
+    tree: &BaseDocument,
+    item_id: NodeId,
     text_content: &str,
     inputs: &taffy::tree::LayoutInput,
 ) -> Result<taffy::Size<f32>, GridPreprocessingError> {
@@ -143,35 +148,115 @@ fn estimate_text_size(
         return Ok(taffy::Size::ZERO);
     }
 
-    // Basic text size estimation based on character count and available space
-    // This is a simplified approach - in production, proper font metrics would be used
-    let char_count = text_content.len() as f32;
-    let estimated_char_width = 8.0; // Approximate character width
-    let estimated_line_height = 16.0; // Approximate line height
+    let node = tree.node_from_id(item_id.into());
 
-    let total_text_width = char_count * estimated_char_width;
-
-    // Find longest word for min-content calculation
-    let longest_word = text_content
-        .split_whitespace()
-        .map(|word| word.len() as f32 * estimated_char_width)
-        .fold(0.0, f32::max);
-
-    // Use CSS-compliant calculation based on available space constraints
-    let text_width_limit = match inputs.available_space.width {
-        AvailableSpace::MinContent => longest_word,
-        AvailableSpace::MaxContent => total_text_width,
-        AvailableSpace::Definite(limit) => limit.min(total_text_width),
-    };
-    let width = longest_word.max(text_width_limit);
-
-    // Estimate height based on text wrapping
-    let lines = if width > 0.0 {
-        (total_text_width / width).ceil().max(1.0)
+    // Extract font information from computed styles
+    let (font_size, font_family) = if let Some(computed_styles) = node.primary_styles() {
+        let font = computed_styles.get_font();
+        
+        // Extract font size
+        let font_size_px = font.font_size.computed_size.px();
+        
+        // Extract font family
+        let family = match font.font_family.families.iter().next() {
+            Some(family) => {
+                use style::values::computed::font::SingleFontFamily;
+                match family {
+                    SingleFontFamily::FamilyName(name) => name.name.as_ref(),
+                    SingleFontFamily::Generic(generic) => {
+                        use style::values::computed::font::GenericFontFamily;
+                        match generic {
+                            GenericFontFamily::Serif => "serif",
+                            GenericFontFamily::SansSerif => "sans-serif",
+                            GenericFontFamily::Monospace => "monospace",
+                            GenericFontFamily::Cursive => "cursive",
+                            GenericFontFamily::Fantasy => "fantasy",
+                            _ => "sans-serif",
+                        }
+                    }
+                }
+            }
+            None => "sans-serif",
+        };
+        
+        (font_size_px, family)
     } else {
-        1.0
+        // Fallback when no styles available
+        (16.0, "sans-serif")
     };
-    let height = lines * estimated_line_height;
+
+    // Calculate max_width for text wrapping based on available space
+    let max_width = match inputs.available_space.width {
+        AvailableSpace::MinContent => None, // No wrapping for min-content
+        AvailableSpace::MaxContent => None, // No wrapping for max-content
+        AvailableSpace::Definite(limit) => Some(limit), // Wrap at definite width
+    };
+
+    // Use text measurement system for accurate sizing
+    let measurement_result = tree.with_text_system(|text_system| {
+        text_system.with_font_system(|_font_system| {
+            // Use the measurement API which handles caching internally
+            use blitz_text::measurement::*;
+            
+            // Create cache manager with fallback
+            let cache_manager_result = UnifiedCacheManager::new();
+            let default_cache = UnifiedCacheManager::default();
+            let cache_manager = match cache_manager_result {
+                Ok(cm) => cm,
+                Err(_) => default_cache,
+            };
+            
+            perform_measurement(
+                text_content,
+                font_size,
+                max_width,
+                font_family,
+                CSSBaseline::Alphabetic,
+                &cache_manager,
+            )
+        })
+    });
+
+    // Extract dimensions from measurement or use fallback
+    let (width, height) = match measurement_result {
+        Ok(Ok(measurement)) => {
+            // Use actual measured dimensions
+            match inputs.available_space.width {
+                AvailableSpace::MinContent => {
+                    // For min-content, use longest word width
+                    let min_width = measurement.line_measurements
+                        .iter()
+                        .map(|line| line.width)
+                        .fold(0.0, f32::max);
+                    (min_width.max(50.0), measurement.content_height)
+                }
+                AvailableSpace::MaxContent => {
+                    // For max-content, use full unwrapped width
+                    (measurement.content_width, measurement.content_height)
+                }
+                AvailableSpace::Definite(_limit) => {
+                    // For definite, use wrapped dimensions
+                    (measurement.content_width, measurement.content_height)
+                }
+            }
+        }
+        _ => {
+            // Fallback when text system unavailable
+            // Use font size for basic estimation (much better than hardcoded 8.0/16.0)
+            let chars_per_line = if let Some(limit) = max_width {
+                (limit / (font_size * 0.6)).max(1.0) as usize
+            } else {
+                text_content.len()
+            };
+            
+            let lines = (text_content.len() as f32 / chars_per_line as f32).ceil().max(1.0);
+            let width = (chars_per_line.min(text_content.len()) as f32 * font_size * 0.6)
+                .max(font_size); // At least one char wide
+            let height = lines * font_size * 1.2; // Standard line height multiplier
+            
+            (width, height)
+        }
+    };
 
     Ok(taffy::Size { width, height })
 }

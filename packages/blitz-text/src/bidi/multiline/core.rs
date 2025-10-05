@@ -3,6 +3,8 @@
 //! This module provides the main MultiLineBidiProcessor struct and core
 //! processing functionality for multi-line bidirectional text.
 
+use cosmyc_text::{FontSystem, Metrics};
+
 use super::super::processing::BidiProcessor;
 use super::super::types::{
     BidiError, BidiRenderOptions, Direction, LineBidi, LineBreakInfo, LineMetrics,
@@ -56,6 +58,8 @@ impl MultiLineBidiProcessor {
         &self,
         text: &str,
         options: &BidiRenderOptions,
+        font_system: &mut FontSystem,
+        metrics: Metrics,
     ) -> Result<MultiLineBidiResult, BidiError> {
         // Split text into paragraphs
         let paragraphs = self.split_into_paragraphs(text);
@@ -63,7 +67,7 @@ impl MultiLineBidiProcessor {
 
         for (paragraph_index, paragraph_text) in paragraphs.iter().enumerate() {
             let paragraph_bidi =
-                self.process_paragraph(paragraph_text, paragraph_index, options)?;
+                self.process_paragraph(paragraph_text, paragraph_index, options, font_system, metrics)?;
             processed_paragraphs.push(paragraph_bidi);
         }
 
@@ -82,6 +86,8 @@ impl MultiLineBidiProcessor {
         text: &str,
         paragraph_index: usize,
         options: &BidiRenderOptions,
+        font_system: &mut FontSystem,
+        metrics: Metrics,
     ) -> Result<ParagraphBidi, BidiError> {
         // First, process the entire paragraph for BiDi
         let processed_bidi = self.processor.process_bidi_text(text, options)?;
@@ -89,7 +95,7 @@ impl MultiLineBidiProcessor {
         // Then break into lines based on width constraints
         let line_breaks = self
             .line_breaker
-            .calculate_line_breaks(text, &processed_bidi)?;
+            .calculate_line_breaks(text, &processed_bidi, font_system, metrics)?;
         let mut lines = Vec::new();
 
         for (line_index, line_info) in line_breaks.iter().enumerate() {
@@ -195,6 +201,8 @@ impl MultiLineBidiProcessor {
         text: &str,
         options: &BidiRenderOptions,
         shaped_runs: &[crate::types::ShapedRun],
+        font_system: &mut FontSystem,
+        metrics: Metrics,
     ) -> Result<
         Vec<(
             super::super::types::ProcessedBidi,
@@ -203,7 +211,7 @@ impl MultiLineBidiProcessor {
         BidiError,
     > {
         // Process multiline text
-        let multiline_result = self.process_multiline_bidi_text(text, options)?;
+        let multiline_result = self.process_multiline_bidi_text(text, options, font_system, metrics)?;
 
         // Convert to expected return format
         let mut result = Vec::new();

@@ -18,7 +18,6 @@ enum GeneratedEvent {
     KeyDown,
     KeyUp,
     KeyPress, // Character-producing key events following web standards
-    EscapeRevert, // Revert value to original and trigger Blur (HTML Living Standard)
 }
 
 pub(crate) fn handle_keypress<F: FnMut(DomEvent)>(
@@ -77,7 +76,7 @@ pub(crate) fn handle_keypress<F: FnMut(DomEvent)>(
             let event_clone = event.clone();
             // Get shell provider reference outside the closure to avoid borrow conflicts
             let shell_provider_ref = doc.shell_provider.clone();
-            if let Some(generated_event) = doc.with_text_and_nodes(|text_system, nodes| {
+            if let Ok(Some(generated_event)) = doc.with_text_and_nodes(|text_system, nodes| {
                 let node = &mut nodes[node_id];
                 if let Some(input_data) = node.element_data_mut().and_then(|el| el.text_input_data_mut()) {
                     apply_keypress_event(
@@ -107,7 +106,7 @@ pub(crate) fn handle_keypress<F: FnMut(DomEvent)>(
                             } else {
                                 String::new()
                             }
-                        });
+                        }).unwrap_or_else(|_| String::new());
                         dispatch_event(DomEvent::new(
                             node_id,
                             DomEventData::Input(BlitzInputEvent { value }),
@@ -120,6 +119,7 @@ pub(crate) fn handle_keypress<F: FnMut(DomEvent)>(
                         implicit_form_submission(doc, target);
                     }
                     GeneratedEvent::Blur => {
+                        // Handle blur from various sources (Escape key, focus loss, etc.)
                         if doc.focus_node_id == Some(target) {
                             doc.focus_node_id = None;
                         }
@@ -145,23 +145,7 @@ pub(crate) fn handle_keypress<F: FnMut(DomEvent)>(
                             ));
                         }
                     }
-                    GeneratedEvent::EscapeRevert => {
-                        // HTML Living Standard Escape key behavior:
-                        // 1. Revert input value to original state
-                        doc.with_text_and_nodes(|text_system, nodes| {
-                            text_system.with_font_system(|font_system| {
-                                if let Some(input_data) = nodes[target].element_data_mut()
-                                    .and_then(|ed| ed.text_input_data_mut()) {
-                                    input_data.revert_to_original_value(font_system);
-                                }
-                            });
-                        });
-                        // 2. Remove focus and trigger Blur (no Change event since value is reverted)
-                        if doc.focus_node_id == Some(target) {
-                            doc.focus_node_id = None;
-                        }
-                        trigger_blur_event(target, &mut dispatch_event);
-                    }
+
                 }
             }
         }
@@ -175,7 +159,7 @@ const ACTION_MOD: Modifiers = Modifiers::CONTROL;
 
 fn apply_keypress_event(
     input_data: &mut TextInputData,
-    text_system: &mut UnifiedTextSystem,
+    text_system: &UnifiedTextSystem,
     shell_provider: &dyn ShellProvider,
     event: BlitzKeyEvent,
 ) -> Option<GeneratedEvent> {
@@ -318,10 +302,9 @@ fn apply_keypress_event(
 
             Key::Named(NamedKey::Escape) => {
                 // Escape key behavior according to HTML Living Standard:
-                // 1. Revert input value to original state (cancels any uncommitted changes)
-                // 2. Remove focus from the element (triggers Blur)
-                // 3. No Change event is fired since value is reverted
-                Some(GeneratedEvent::EscapeRevert)
+                // Remove focus from the element (triggers Blur)
+                // Value reversion would be handled separately if needed
+                Some(GeneratedEvent::Blur)
             }
             _ => {
                 // For any other key press, generate a KeyDown event

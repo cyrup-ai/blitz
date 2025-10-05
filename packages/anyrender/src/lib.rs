@@ -37,6 +37,8 @@ pub use wasm_send_sync::*;
 pub mod types;
 pub use types::*;
 
+
+
 /// Abstraction for rendering a scene to a window
 pub trait WindowRenderer {
     type ScenePainter<'a>: PaintScene
@@ -47,6 +49,12 @@ pub trait WindowRenderer {
     fn is_active(&self) -> bool;
     fn set_size(&mut self, width: u32, height: u32);
     fn render<F: FnOnce(&mut Self::ScenePainter<'_>)>(&mut self, draw_fn: F);
+    
+    /// Initialize text system for a document with GPU context
+    /// Default implementation does nothing - renderers that support text should override this
+    fn initialize_text_system(&self, _doc: &dyn std::any::Any) -> Result<(), String> {
+        Ok(()) // Default no-op implementation
+    }
 }
 
 /// Abstraction for rendering a scene to an image buffer

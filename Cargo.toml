@@ -1,5 +1,6 @@
 [workspace]
 resolver = "2"
+exclude = ["tmp/*"]
 members = [
     "packages/anyrender",
     "packages/anyrender_svg", 
@@ -16,6 +17,7 @@ members = [
     "packages/blitz-traits",
     "packages/mini-dxn",
     "packages/stylo_taffy",
+    "examples/wgpu_texture",
 ]
 
 [workspace.package]
@@ -27,3 +29,6 @@ selectors = { git = "https://github.com/cyrup-ai/stylo", branch = "main" }
 markup5ever = { git = "https://github.com/cyrup-ai/html5ever", branch = "main" }
 web_atoms = { git = "https://github.com/cyrup-ai/html5ever", branch = "main" }
 html5ever = { git = "https://github.com/cyrup-ai/html5ever", branch = "main" }
+
+[patch."https://github.com/cyrup-ai/blitz"]
+blitz-text = { path = "packages/blitz-text" }

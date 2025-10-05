@@ -25,14 +25,14 @@ log = "0.4.28"
 thiserror = "2.0.16"
 glyphon = { git = "https://github.com/cyrup-ai/glyphon", branch = "main" }
 blitz-text = { path = "../blitz-text" }
+blitz-dom = { path = "../blitz-dom" }
 etagere = "0.2"  # Required by glyphon for texture atlas allocation
 
 [dependencies.anyrender]
 path = "../anyrender"
 
 [dependencies.vello]
-git = "https://github.com/cyrup-ai/vello"
-branch = "main"
+path = "../../tmp/vello"
 
 [dependencies.wgpu]
 git = "https://github.com/cyrup-ai/wgpu"

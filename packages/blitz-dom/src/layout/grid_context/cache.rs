@@ -4,9 +4,9 @@
 //! and parent grid contexts, dramatically improving performance over O(n²) tree searches.
 
 use std::cell::RefCell;
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use taffy::prelude::NodeId;
 
@@ -54,7 +54,7 @@ impl GridContextCache {
         self.cache_generation += 1;
     }
 
-    /// High-performance cached lookup with fallback computation
+    /// High-performance cached lookup with O(1) BaseDocument optimization
     pub fn get_or_compute_parent_context<Tree>(
         &mut self,
         tree: &Tree,
@@ -63,56 +63,44 @@ impl GridContextCache {
     where
         Tree: taffy::LayoutGridContainer + taffy::TraversePartialTree + 'static,
     {
-        let start_time = Instant::now();
-
-        // Level 1: Check direct parent cache
+        // Level 1: Check cache first
         if let Some(parent_opt) = self.parent_cache.get(&node_id) {
             if let Some(parent_id) = parent_opt {
-                // Level 2: Check grid context cache
                 if let Some(context) = self.context_cache.get(parent_id) {
                     self.cache_hits.fetch_add(1, Ordering::Relaxed);
                     return Ok(Some(context.clone()));
                 }
             } else {
-                // Cached negative result
                 self.cache_hits.fetch_add(1, Ordering::Relaxed);
                 return Ok(None);
             }
         }
 
-        // Level 3: Check negative cache
-        if self.not_found_cache.contains(&node_id) {
-            self.cache_hits.fetch_add(1, Ordering::Relaxed);
-            return Ok(None);
-        }
-
-        // Cache miss - compute with optimized algorithms
+        // Level 2: Use O(1) direct access for BaseDocument
         self.cache_misses.fetch_add(1, Ordering::Relaxed);
         let result = self.compute_parent_context_efficient(tree, node_id)?;
 
-        // Update caches based on result
-        match &result {
-            Some(context) => {
-                if let Some(parent) = self.find_actual_parent(tree, node_id)? {
-                    self.parent_cache.insert(node_id, Some(parent));
-                    self.context_cache.insert(parent, context.clone());
+        // Update cache with result
+        if let Some(context) = &result {
+            // For BaseDocument, we can easily get the parent to cache
+            if let Some(base_doc) = (tree as &dyn std::any::Any).downcast_ref::<crate::BaseDocument>() {
+                if let Some(node) = base_doc.get_node(usize::from(node_id)) {
+                    if let Some(parent_id) = node.parent {
+                        let parent_node_id = NodeId::from(parent_id);
+                        self.parent_cache.insert(node_id, Some(parent_node_id));
+                        self.context_cache.insert(parent_node_id, context.clone());
+                    }
                 }
             }
-            None => {
-                self.parent_cache.insert(node_id, None);
-                self.not_found_cache.insert(node_id);
-            }
+        } else {
+            self.parent_cache.insert(node_id, None);
+            self.not_found_cache.insert(node_id);
         }
-
-        // Track performance metrics
-        let elapsed = start_time.elapsed().as_nanos() as u64;
-        self.computation_time_saved
-            .fetch_add(elapsed, Ordering::Relaxed);
 
         Ok(result)
     }
 
-    /// Compute parent context using efficient algorithms (BFS + heuristics)
+    /// Compute parent context using O(1) direct access for BaseDocument
     fn compute_parent_context_efficient<Tree>(
         &mut self,
         tree: &Tree,
@@ -121,71 +109,34 @@ impl GridContextCache {
     where
         Tree: taffy::LayoutGridContainer + taffy::TraversePartialTree + 'static,
     {
-        // Strategy 1: Try heuristic search first (fastest for common cases)
-        if let Some(parent) = self.find_parent_heuristic(tree, target_node)? {
-            if let Some(context) = check_parent_grid_container(tree, parent)? {
-                return Ok(Some(context));
-            }
+        // Use direct parent access for BaseDocument (O(1))
+        if let Some(base_doc) = (tree as &dyn std::any::Any).downcast_ref::<crate::BaseDocument>() {
+            let node = match base_doc.get_node(usize::from(target_node)) {
+                Some(node) => node,
+                None => return Ok(None),
+            };
+            
+            let parent_id = match node.parent {
+                Some(id) => NodeId::from(id),
+                None => return Ok(None),
+            };
+            
+            return check_parent_grid_container(tree, parent_id);
         }
-
-        // Strategy 2: Fall back to BFS with early termination (comprehensive)
-        if let Some(parent) = self.find_parent_breadth_first(tree, target_node)? {
-            if let Some(context) = check_parent_grid_container(tree, parent)? {
-                return Ok(Some(context));
-            }
-        }
-
-        Ok(None)
+        
+        // Fallback for non-BaseDocument trees (keep existing heuristic for compatibility)
+        self.find_parent_heuristic(tree, target_node)
+            .and_then(|parent_opt| {
+                match parent_opt {
+                    Some(parent) => check_parent_grid_container(tree, parent),
+                    None => Ok(None),
+                }
+            })
     }
 
-    /// Breadth-first search with early termination - O(log n) average case
-    fn find_parent_breadth_first<Tree>(
-        &mut self,
-        tree: &Tree,
-        target_node: NodeId,
-    ) -> Result<Option<NodeId>, GridContextError>
-    where
-        Tree: taffy::TraversePartialTree,
-    {
-        let mut queue = VecDeque::with_capacity(64);
-        let mut visited = HashSet::with_capacity(256);
 
-        // Heuristic: Start from likely root nodes (most DOM trees have roots at low IDs)
-        for root_candidate in 0..10 {
-            queue.push_back(NodeId::from(root_candidate as usize));
-        }
 
-        while let Some(current_node) = queue.pop_front() {
-            if visited.contains(&current_node) {
-                continue;
-            }
-            visited.insert(current_node);
-
-            // Direct O(children) check instead of O(n²) nested loops
-            let child_count = tree.child_count(current_node);
-            for i in 0..child_count {
-                let child = tree.get_child_id(current_node, i);
-                if child == target_node {
-                    // Early termination - found the parent!
-                    return Ok(Some(current_node));
-                }
-
-                // Add children to queue for continued search
-                if !visited.contains(&child) {
-                    queue.push_back(child);
-                }
-            }
-
-            // Safety: Prevent infinite loops in malformed trees
-            if visited.len() > 1000 {
-                break;
-            }
-        }
-
-        Ok(None)
-    }
-
-    /// Heuristic search leveraging NodeId allocation patterns - O(√n) average case
+    /// Simplified heuristic for non-BaseDocument trees only
     fn find_parent_heuristic<Tree>(
         &self,
         tree: &Tree,
@@ -194,28 +145,19 @@ impl GridContextCache {
     where
         Tree: taffy::TraversePartialTree,
     {
+        // This method is now only used for non-BaseDocument trees
+        // Most usage should go through the O(1) BaseDocument path
+        
         let target_idx = usize::from(target_node);
-
-        // Heuristic 1: Parent nodes typically have lower NodeId values
-        // This leverages sequential allocation patterns in most DOM implementations
-        for parent_candidate_idx in (0..target_idx).rev() {
+        
+        // Simplified heuristic: check likely parent candidates only
+        for parent_candidate_idx in (target_idx.saturating_sub(10)..target_idx).rev() {
             let parent_candidate = NodeId::from(parent_candidate_idx);
             if self.is_direct_parent(tree, parent_candidate, target_node)? {
                 return Ok(Some(parent_candidate));
             }
         }
-
-        // Heuristic 2: Check siblings of cached nodes (locality principle)
-        let search_range = 50.min(target_idx);
-        for sibling_idx in target_idx.saturating_sub(search_range)..=target_idx + search_range {
-            let sibling = NodeId::from(sibling_idx);
-            if let Some(sibling_parent) = self.parent_cache.get(&sibling).copied().flatten() {
-                if self.is_direct_parent(tree, sibling_parent, target_node)? {
-                    return Ok(Some(sibling_parent));
-                }
-            }
-        }
-
+        
         Ok(None)
     }
 
@@ -254,12 +196,8 @@ impl GridContextCache {
     where
         Tree: taffy::TraversePartialTree,
     {
-        // Try heuristic first, then BFS
-        if let Some(parent) = self.find_parent_heuristic(tree, target_node)? {
-            return Ok(Some(parent));
-        }
-
-        self.find_parent_breadth_first(tree, target_node)
+        // Use only heuristic for non-BaseDocument trees
+        self.find_parent_heuristic(tree, target_node)
     }
 
     /// Invalidate cache when tree structure changes

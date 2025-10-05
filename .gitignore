@@ -18,6 +18,7 @@
 ./crates-lsp/*
 **/CLAUDE.md
 ./CLAUDE.md
+task/*
 
 # ==============================
 # Rust Specific

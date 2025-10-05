@@ -3,6 +3,7 @@
 use goldylox::prelude::*;
 use serde::{Deserialize, Serialize};
 use serde_json;
+use swash::Feature;
 
 /// Features cache key for goldylox
 #[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Default)]
@@ -71,7 +72,11 @@ pub struct FeaturesCache {
 }
 
 impl FeaturesCache {
-    pub fn new() -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn new() -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static CACHE_COUNTER: AtomicU64 = AtomicU64::new(0);
+        let cache_id = format!("features_cache_{}", CACHE_COUNTER.fetch_add(1, Ordering::Relaxed));
+        
         let cache = GoldyloxBuilder::<String, FeaturesValue>::new()
             .hot_tier_max_entries(300)
             .hot_tier_memory_limit_mb(16)
@@ -80,7 +85,7 @@ impl FeaturesCache {
             .cold_tier_max_size_bytes(64 * 1024 * 1024) // 64MB
             .compression_level(5)
             .background_worker_threads(1)
-            .cache_id("features_cache")
+            .cache_id(&cache_id)
             .build()?;
 
         Ok(Self { cache })
@@ -136,9 +141,13 @@ impl Default for FeaturesCache {
     fn default() -> Self {
         Self::new().unwrap_or_else(|_| {
             // Fallback: create a minimal cache that always works
+            use std::sync::atomic::{AtomicU64, Ordering};
+            static FALLBACK_COUNTER: AtomicU64 = AtomicU64::new(0);
+            let fallback_cache_id = format!("features_cache_fallback_{}", FALLBACK_COUNTER.fetch_add(1, Ordering::Relaxed));
+            
             FeaturesCache {
-                cache: GoldyloxBuilder::<String, Vec<Feature>>::new()
-                    .cache_id("features_cache_fallback")
+                cache: GoldyloxBuilder::<String, FeaturesValue>::new()
+                    .cache_id(&fallback_cache_id)
                     .build()
                     .unwrap(),
             }

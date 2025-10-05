@@ -426,14 +426,12 @@ impl Default for WebFontCache {
         Self::new().unwrap_or_else(|_| {
             // Fallback: create a minimal cache that always works
             WebFontCache {
-                cache: GoldyloxBuilder::<String, CachedWebFont>::new()
+                cache: GoldyloxBuilder::<WebFontCacheKey, WebFontEntry>::new()
                     .cache_id("webfont_cache_fallback")
                     .build()
                     .unwrap(),
-                loading_operations: std::collections::HashMap::new(),
-                failed_loads: std::collections::HashSet::new(),
-                stats: WebFontCacheStats::default(),
-                last_cleanup: std::time::Instant::now(),
+                generation: 0,
+                entry_count: Arc::new(AtomicUsize::new(0)),
             }
         })
     }

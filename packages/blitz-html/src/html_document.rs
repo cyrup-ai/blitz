@@ -39,7 +39,8 @@ impl HtmlDocument {
                 ss.push(String::from(DEFAULT_CSS));
             }
         }
-        let mut doc = BaseDocument::new(config);
+        let mut doc = BaseDocument::new(config)
+            .expect("Failed to create BaseDocument - invalid configuration");
         DocumentHtmlParser::parse_into_doc(&mut doc, html);
         HtmlDocument { inner: doc }
     }

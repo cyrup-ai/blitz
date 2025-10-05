@@ -163,6 +163,7 @@ where
         parent_column_line_names,
         parent_has_subgrid_rows: detect_subgrid_axis_from_style(tree, node_id, true),
         parent_has_subgrid_columns: detect_subgrid_axis_from_style(tree, node_id, false),
+        parent_size: taffy::Size::NONE, // No parent size available in this context
     };
 
     Ok(Some(parent_context))

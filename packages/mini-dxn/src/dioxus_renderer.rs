@@ -8,26 +8,21 @@ pub use anyrender_vello::{
     CustomPaintSource, VelloWindowRenderer as InnerRenderer,
     wgpu::{Features, Limits},
 };
-#[cfg(feature = "cpu_backend")]
+#[cfg(all(feature = "cpu_backend", not(feature = "gpu_backend")))]
 use anyrender_vello_cpu::VelloCpuWindowRenderer as InnerRenderer;
 
 #[cfg(feature = "gpu_backend")]
 pub fn use_wgpu<T: CustomPaintSource>(create_source: impl FnOnce() -> T) -> u64 {
-    use dioxus_core::{consume_context, use_hook_with_cleanup};
+    use dioxus_core::{consume_context, use_hook};
 
-    let (_renderer, id) = use_hook_with_cleanup(
-        || {
-            let renderer = consume_context::<DxnWindowRenderer>();
-            let source = Box::new(create_source());
-            let id = renderer.register_custom_paint_source(source);
-            (renderer, id)
-        },
-        |(renderer, id)| {
-            renderer.unregister_custom_paint_source(id);
-        },
-    );
-
-    id
+    // Register paint source on first render only, keep it alive for the lifetime of the app
+    // Don't use cleanup hooks since VirtualDom mutations can trigger premature cleanup
+    use_hook(|| {
+        let renderer = consume_context::<DxnWindowRenderer>();
+        let source = Box::new(create_source());
+        let id = renderer.register_custom_paint_source(source);
+        id
+    })
 }
 
 #[derive(Clone)]
@@ -44,13 +39,17 @@ impl Default for DxnWindowRenderer {
 impl DxnWindowRenderer {
     pub fn new() -> Self {
         let vello_renderer = InnerRenderer::new();
-        Self::with_inner_renderer(vello_renderer)
+        let result = Self::with_inner_renderer(vello_renderer);
+        println!("🟡 DxnWindowRenderer::new() - created with Rc ptr: {:p}", Rc::as_ptr(&result.inner));
+        result
     }
 
     #[cfg(feature = "gpu_backend")]
     pub fn with_features_and_limits(features: Option<Features>, limits: Option<Limits>) -> Self {
         let vello_renderer = InnerRenderer::with_features_and_limits(features, limits);
-        Self::with_inner_renderer(vello_renderer)
+        let result = Self::with_inner_renderer(vello_renderer);
+        println!("🟡 DxnWindowRenderer::with_features_and_limits() - created with Rc ptr: {:p}", Rc::as_ptr(&result.inner));
+        result
     }
 
     fn with_inner_renderer(vello_renderer: InnerRenderer) -> Self {
@@ -63,6 +62,8 @@ impl DxnWindowRenderer {
 impl DxnWindowRenderer {
     #[cfg(feature = "gpu_backend")]
     pub fn register_custom_paint_source(&self, source: Box<dyn CustomPaintSource>) -> u64 {
+        let ptr = Rc::as_ptr(&self.inner);
+        println!("🔵 DxnWindowRenderer::register_custom_paint_source - Rc ptr: {:p}", ptr);
         self.inner.borrow_mut().register_custom_paint_source(source)
     }
 
@@ -71,9 +72,7 @@ impl DxnWindowRenderer {
         self.inner.borrow_mut().unregister_custom_paint_source(id)
     }
 
-    // Text system initialization is now handled automatically by BaseDocument.with_text_system()
-    // No explicit initialization needed - the document will create a headless text system
-    // when needed and upgrade to GPU-accelerated when GPU context becomes available
+
 }
 
 impl WindowRenderer for DxnWindowRenderer {
@@ -98,7 +97,13 @@ impl WindowRenderer for DxnWindowRenderer {
         self.inner.borrow_mut().set_size(width, height)
     }
 
+    fn initialize_text_system(&self, doc: &dyn std::any::Any) -> Result<(), String> {
+        self.inner.borrow().initialize_text_system(doc)
+    }
+
     fn render<F: FnOnce(&mut Self::ScenePainter<'_>)>(&mut self, draw_fn: F) {
+        let ptr = Rc::as_ptr(&self.inner);
+        println!("🟢 DxnWindowRenderer::render - Rc ptr: {:p}", ptr);
         self.inner.borrow_mut().render(draw_fn)
     }
 }

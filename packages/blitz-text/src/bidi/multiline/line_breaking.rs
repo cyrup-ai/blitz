@@ -5,6 +5,8 @@
 
 use unicode_linebreak::{linebreaks, BreakOpportunity};
 
+use cosmyc_text::{Attrs, Buffer, FontSystem, Metrics, Shaping};
+
 use super::super::types::{BidiError, LineBreakInfo, ProcessedBidi};
 
 /// Line breaking processor for multi-line text
@@ -33,6 +35,8 @@ impl LineBreaker {
         &self,
         text: &str,
         processed_bidi: &ProcessedBidi,
+        font_system: &mut FontSystem,
+        metrics: Metrics,
     ) -> Result<Vec<LineBreakInfo>, BidiError> {
         // Find Unicode line break opportunities
         let break_opportunities: Vec<_> = linebreaks(text).collect();
@@ -43,9 +47,9 @@ impl LineBreaker {
             let break_position = break_opportunity.0;
 
             // Check if we should break here based on width constraints
-            if self.should_break_line(text, current_line_start, break_position, processed_bidi)? {
+            if self.should_break_line(text, current_line_start, break_position, processed_bidi, font_system, metrics)? {
                 let line_text = &text[current_line_start..break_position];
-                let line_width = self.calculate_line_width(line_text, processed_bidi)?;
+                let line_width = self.calculate_line_width(line_text, processed_bidi, font_system, metrics)?;
 
                 lines.push(LineBreakInfo {
                     text: line_text.to_string(),
@@ -65,7 +69,7 @@ impl LineBreaker {
         // Handle remaining text
         if current_line_start < text.len() {
             let line_text = &text[current_line_start..];
-            let line_width = self.calculate_line_width(line_text, processed_bidi)?;
+            let line_width = self.calculate_line_width(line_text, processed_bidi, font_system, metrics)?;
 
             lines.push(LineBreakInfo {
                 text: line_text.to_string(),
@@ -86,9 +90,16 @@ impl LineBreaker {
         line_start: usize,
         break_position: usize,
         processed_bidi: &ProcessedBidi,
+        font_system: &mut FontSystem,
+        metrics: Metrics,
     ) -> Result<bool, BidiError> {
         let line_text = &text[line_start..break_position];
-        let line_width = self.calculate_line_width(line_text, processed_bidi)?;
+        let line_width = self.calculate_line_width(
+            line_text,
+            processed_bidi,
+            font_system,
+            metrics,
+        )?;
 
         Ok(line_width > self.max_width)
     }
@@ -98,10 +109,26 @@ impl LineBreaker {
         &self,
         line_text: &str,
         processed_bidi: &ProcessedBidi,
+        font_system: &mut FontSystem,
+        metrics: Metrics,
     ) -> Result<f32, BidiError> {
-        // This is a simplified calculation
-        // In practice, would need shaped runs to get accurate width
-        Ok(line_text.chars().count() as f32 * 10.0) // Rough estimate
+        // Handle empty text edge case
+        if line_text.is_empty() {
+            return Ok(0.0);
+        }
+
+        // Create temporary buffer for accurate measurement
+        let mut temp_buffer = Buffer::new(font_system, metrics);
+        temp_buffer.set_text(font_system, line_text, &Attrs::new(), Shaping::Advanced);
+        temp_buffer.set_size(font_system, Some(f32::INFINITY), None);
+
+        // Calculate accurate width from shaped runs
+        let width = temp_buffer
+            .layout_runs()
+            .map(|run| run.line_w)
+            .fold(0.0f32, f32::max);
+
+        Ok(width)
     }
 
     /// Find optimal break points using advanced algorithms
@@ -109,6 +136,8 @@ impl LineBreaker {
         &self,
         text: &str,
         processed_bidi: &ProcessedBidi,
+        font_system: &mut FontSystem,
+        metrics: Metrics,
     ) -> Result<Vec<usize>, BidiError> {
         // This would implement algorithms like Knuth-Plass line breaking
         // For now, use simple greedy approach
@@ -120,7 +149,7 @@ impl LineBreaker {
         for break_opportunity in break_opportunities {
             let break_position = break_opportunity.0;
 
-            if self.should_break_line(text, current_line_start, break_position, processed_bidi)? {
+            if self.should_break_line(text, current_line_start, break_position, processed_bidi, font_system, metrics)? {
                 optimal_breaks.push(break_position);
                 current_line_start = break_position;
             }
@@ -140,6 +169,8 @@ impl LineBreaker {
         text: &str,
         break_position: usize,
         processed_bidi: &ProcessedBidi,
+        font_system: &mut FontSystem,
+        metrics: Metrics,
     ) -> Result<f32, BidiError> {
         // Penalty factors:
         // - Line length deviation from ideal
@@ -151,7 +182,7 @@ impl LineBreaker {
             .map(|pos| pos + 1)
             .unwrap_or(0);
         let line_text = &text[line_start..break_position];
-        let line_width = self.calculate_line_width(line_text, processed_bidi)?;
+        let line_width = self.calculate_line_width(line_text, processed_bidi, font_system, metrics)?;
 
         // Simple penalty based on width deviation
         let ideal_width = self.max_width * 0.8; // 80% of max width is ideal

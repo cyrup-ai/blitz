@@ -44,10 +44,13 @@ mod form;
 /// Integration of taffy and the DOM.
 pub mod layout;
 mod mutator;
+pub mod navigation;
 mod query_selector;
 /// Implementations that interact with servo's style engine
 mod stylo;
 pub mod stylo_to_cursor_icon;
+/// High-performance text system singleton
+mod text_system_singleton;
 mod traversal;
 mod url;
 
@@ -70,3 +73,42 @@ pub use style::Atom;
 pub use style::invalidation::element::restyle_hints::RestyleHint;
 pub type SelectorList = selectors::SelectorList<style::selector_parser::SelectorImpl>;
 pub use events::{EventDriver, EventHandler, NoopEventHandler};
+pub use navigation::BlitzNavigationProvider;
+pub use text_system_singleton::{TextSystemSingleton, TextSystemSingletonError};
+
+use std::sync::Arc;
+use blitz_traits::navigation::NavigationProvider;
+
+/// Create a default navigation provider for production use
+pub fn create_default_navigation_provider() -> Arc<dyn NavigationProvider> {
+    Arc::new(BlitzNavigationProvider::default())
+}
+
+/// Create a DocumentConfig with production-ready defaults where possible
+/// 
+/// Note: net_provider and shell_provider must still be provided by the caller
+/// as they require external dependencies (blitz-net and blitz-shell crates)
+pub fn create_production_config_base() -> DocumentConfig {
+    DocumentConfig {
+        navigation_provider: Some(create_default_navigation_provider()),
+        ..Default::default()
+    }
+}
+
+/// Helper to create a BaseDocument with proper error handling
+/// 
+/// Returns a Result to handle missing required providers
+pub fn create_document(config: DocumentConfig) -> Result<BaseDocument, &'static str> {
+    BaseDocument::new(config)
+}
+
+/// Create a minimal DocumentConfig suitable for testing
+/// 
+/// Uses the default navigation provider but requires net and shell providers
+/// to be added for full functionality
+pub fn create_minimal_config() -> DocumentConfig {
+    DocumentConfig {
+        navigation_provider: Some(create_default_navigation_provider()),
+        ..Default::default()
+    }
+}

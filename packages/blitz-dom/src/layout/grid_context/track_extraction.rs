@@ -273,8 +273,6 @@ pub fn detect_subgrid_from_stylo(computed_styles: &ComputedValues, axis: GridAxi
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     // Note: Full CSS parsing tests would require additional infrastructure
     // The following tests are placeholders showing the expected interface
     // but cannot be implemented without CSS parsing capabilities

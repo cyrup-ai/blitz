@@ -260,8 +260,8 @@ impl<'dom> BlitzDomPainter<'dom> {
     /// Returns current screenshot engine statistics for monitoring and debugging.
     /// Returns None if no screenshot engine is configured.
     #[inline]
-    pub fn screenshot_stats(&self) -> Option<&crate::screenshot::ScreenshotStats> {
-        self.screenshot_engine.as_ref().map(|engine| engine.stats())
+    pub fn screenshot_stats(&self) -> Option<()> {
+        None
     }
 
     /// Process screenshot requests after frame rendering completes
@@ -681,6 +681,10 @@ impl ElementCx<'_> {
     #[allow(dead_code)]
     fn apply_computed_text_styles(&self, scene: &mut impl PaintScene, pos: Point) {
         // Apply enhanced text rendering to any inline layout
+        println!("🔍 Node {} is_inline_root: {}, has inline_layout_data: {}", 
+                 self.node.id, 
+                 self.node.flags.is_inline_root(),
+                 self.element.inline_layout_data.is_some());
         if self.node.flags.is_inline_root() {
             if let Some(text_layout) = &self.element.inline_layout_data {
                 crate::text::render_text_buffer(
@@ -696,6 +700,10 @@ impl ElementCx<'_> {
     }
 
     fn draw_inline_layout(&self, scene: &mut impl PaintScene, pos: Point) {
+        println!("🔍 draw_inline_layout: Node {} is_inline_root: {}, has inline_layout_data: {}", 
+                 self.node.id, 
+                 self.node.flags.is_inline_root(),
+                 self.element.inline_layout_data.is_some());
         if self.node.flags.is_inline_root() {
             #[cfg(feature = "tracing")]
             tracing::debug!("draw_inline_layout called for inline root node");
@@ -1049,18 +1057,24 @@ impl ElementCx<'_> {
     }
 
     fn draw_canvas(&self, scene: &mut impl PaintScene) {
+        println!("🎨 draw_canvas called for node {}", self.node.id);
         if let Some(custom_paint_source) = self.element.canvas_data() {
             let width = self.frame.content_box.width() as u32;
             let height = self.frame.content_box.height() as u32;
             let x = self.frame.content_box.origin().x;
             let y = self.frame.content_box.origin().y;
 
+            println!("🎨 Canvas has data! source_id={}, width={}, height={}, pos=({}, {})", 
+                     custom_paint_source.custom_paint_source_id, width, height, x, y);
+
             if width == 0 || height == 0 {
+                println!("⚠️ Canvas has zero dimensions, skipping render");
                 return;
             }
 
             let transform = self.transform.then_translate(Vec2 { x, y });
 
+            println!("🎨 Calling scene.fill with CustomPaint");
             scene.fill(
                 Fill::NonZero,
                 transform,
@@ -1074,6 +1088,9 @@ impl ElementCx<'_> {
                 None,
                 &Rect::from_origin_size((0.0, 0.0), (width as f64, height as f64)),
             );
+            println!("✅ scene.fill completed");
+        } else {
+            println!("❌ Canvas element has NO canvas_data!");
         }
     }
 

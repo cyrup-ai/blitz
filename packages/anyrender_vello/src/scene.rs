@@ -76,8 +76,8 @@ impl VelloScenePainter<'_> {
             scale,
         } = custom_paint;
 
-        log::trace!(
-            "render_custom_source: source_id={}, size={}x{}, scale={}",
+        println!(
+            "🎨🔧 render_custom_source: source_id={}, size={}x{}, scale={}",
             source_id,
             width,
             height,
@@ -92,20 +92,20 @@ impl VelloScenePainter<'_> {
         } = self;
 
         // Render custom paint source
-        log::trace!(
-            "render_custom_source: looking for source_id {} in map with {} sources",
+        println!(
+            "🎨🔧 render_custom_source: looking for source_id {} in map with {} sources",
             source_id,
             custom_paint_sources.len()
         );
         for (id, _) in custom_paint_sources.iter() {
-            log::trace!("  available source ID: {}", id);
+            println!("🎨🔧   available source ID: {}", id);
         }
         let source = custom_paint_sources.get_mut(&source_id)?;
-        log::trace!("render_custom_source: found source, calling render");
+        println!("🎨🔧 render_custom_source: found source, calling source.render()");
         let ctx = CustomPaintCtx::new(renderer);
         let texture_handle = source.render(ctx, width, height, scale)?;
-        log::trace!(
-            "render_custom_source: got texture handle ID {}, returning dummy image",
+        println!(
+            "🎨🔧 render_custom_source: got texture handle ID {}, returning dummy image",
             texture_handle.id
         );
 
@@ -216,6 +216,7 @@ impl PaintScene for VelloScenePainter<'_> {
         color: peniko::Color,
         transform: Affine,
     ) {
+        println!("🎯 render_text_buffer called! glyphon_state is: {}", if self.glyphon_state.is_some() { "Some" } else { "None" });
         if let Some(glyphon) = &mut self.glyphon_state {
             // Convert peniko Color to glyphon Color
             let glyphon_color = glyphon::Color::rgba(
@@ -229,6 +230,7 @@ impl PaintScene for VelloScenePainter<'_> {
             let scaled_pos = transform * position;
 
             // Collect this text buffer for batch GPU rendering
+            println!("🎯 ADDING TEXT AREA at ({}, {}) with {} runs", scaled_pos.x, scaled_pos.y, buffer.layout_runs().count());
             glyphon.pending_text_areas.push(crate::PendingTextArea {
                 buffer: Rc::new(buffer.clone()),
                 left: scaled_pos.x as f32,

@@ -110,9 +110,14 @@ where
     THREAD_LOCAL_FONT_SYSTEM.with(|font_system| {
         let mut font_system_opt = font_system.borrow_mut();
 
-        // Initialize FontSystem on first access
+        // Initialize FontSystem on first access WITH embedded fallback
         if font_system_opt.is_none() {
-            *font_system_opt = Some(FontSystem::new());
+            let mut new_font_system = FontSystem::new();
+
+            // CRITICAL: Load embedded fallback to guarantee font_id validity
+            let _ = crate::embedded_fallback::load_embedded_fallback(new_font_system.db_mut());
+
+            *font_system_opt = Some(new_font_system);
         }
 
         // Use proper error handling instead of unwrap

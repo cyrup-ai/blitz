@@ -232,7 +232,7 @@ impl NetHandler<Resource> for FontFaceHandler {
                 let decompressed = woff::version2::decompress(&bytes);
 
                 #[cfg(feature = "woff-rust")]
-                let decompressed = woff2_patched::decode::convert_woff2_to_ttf(&mut bytes).ok();
+                let decompressed = woff2::decode::convert_woff2_to_ttf(&mut bytes).ok();
 
                 #[cfg(not(any(feature = "woff-c", feature = "woff-rust")))]
                 let decompressed: Option<Vec<u8>> = None;

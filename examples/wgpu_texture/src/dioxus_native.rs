@@ -1,8 +1,7 @@
-use std::any::Any;
-
 use color::{palette::css::WHITE, parse_color};
 use dioxus::prelude::*;
 use mini_dxn::use_wgpu;
+use std::any::Any;
 
 use crate::{limits, Color, DemoMessage, DemoPaintSource, FEATURES, STYLES};
 
@@ -27,29 +26,31 @@ fn app() -> Element {
 
     rsx!(
         style { {STYLES} }
-        div { id:"overlay",
-            h2 { "Control Panel" },
-            button {
-                onclick: move |_| *show_cube.write() = !show_cube(),
-                if show_cube() {
-                    "Hide cube"
-                } else {
-                    "Show cube"
+        main { id: "main",
+            div { id:"overlay",
+                h2 { "Control Panel" },
+                button {
+                    onclick: move |_| *show_cube.write() = !show_cube(),
+                    if show_cube() {
+                        "Hide cube"
+                    } else {
+                        "Show cube"
+                    }
                 }
+                br {}
+                ColorControl { label: "Color:", color_str },
+                p { "This overlay demonstrates that the custom WGPU content can be rendered beneath layers of HTML content" }
             }
-            br {}
-            ColorControl { label: "Color:", color_str },
-            p { "This overlay demonstrates that the custom WGPU content can be rendered beneath layers of HTML content" }
-        }
-        div { id:"underlay",
-            h2 { "Underlay" },
-            p { "This underlay demonstrates that the custom WGPU content can be rendered above layers and blended with the content underneath" }
-        }
-        header {
-            h2 { "Blitz WGPU Demo" }
-        }
-        if show_cube() {
-            SpinningCube { color }
+            div { id:"underlay",
+                h2 { "Underlay" },
+                p { "This underlay demonstrates that the custom WGPU content can be rendered above layers and blended with the content underneath" }
+            }
+            header {
+                h2 { "Blitz WGPU Demo" }
+            }
+            if show_cube() {
+                SpinningCube { color }
+            }
         }
     )
 }
@@ -60,6 +61,7 @@ fn ColorControl(label: &'static str, color_str: Signal<String>) -> Element {
         class: "color-control",
         { label },
         input {
+            r#type: "text",
             value: color_str(),
             oninput: move |evt| {
                 *color_str.write() = evt.value()
@@ -76,7 +78,9 @@ fn SpinningCube(color: Memo<Color>) -> Element {
     let paint_source_id = use_wgpu(move || paint_source);
 
     use_effect(move || {
-        sender.send(DemoMessage::SetColor(color())).unwrap();
+        if let Err(e) = sender.send(DemoMessage::SetColor(color())) {
+            log::warn!("Failed to send color message to demo renderer: {}", e);
+        }
     });
 
     rsx!(

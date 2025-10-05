@@ -65,7 +65,10 @@ impl UnifiedTextSystem {
             line_measurements: Vec::new(),
             total_character_count: text.len(),
             baseline_offset: 0.0,
-            measured_at: std::time::Instant::now(),
+            measured_at: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis() as u64,
         })
     }
 

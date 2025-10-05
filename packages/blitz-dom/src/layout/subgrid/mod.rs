@@ -97,15 +97,119 @@ where
 
 /// Process current subgrid level with parent inheritance
 fn process_current_subgrid_level<Tree>(
-    _tree: &mut Tree,
-    _subgrid_id: taffy::prelude::NodeId,
-    _parent_context: &ParentGridContext,
-    _coordination: &mut NestedSubgridCoordination,
+    tree: &mut Tree,
+    subgrid_id: taffy::prelude::NodeId,
+    parent_context: &ParentGridContext,
+    coordination: &mut NestedSubgridCoordination,
 ) -> SubgridResult<()>
 where
     Tree: taffy::LayoutGridContainer + taffy::TraversePartialTree + 'static,
 {
-    // Simplified implementation - would process inheritance in full version
+    use super::grid_coordination::types::GridLayoutCoordinator;
+
+    // Step 1: Create coordinator for this subgrid level
+    let coordinator = GridLayoutCoordinator::default();
+
+    // Step 2: Determine subgrid span in parent
+    let subgrid_span = coordinator.determine_subgrid_span(subgrid_id, parent_context)
+        .map_err(|e| SubgridError::CoordinationFailed { details: e.to_string() })?;
+
+    // Step 3: Extract parent tracks for this span
+    let inherited_tracks = coordinator.extract_parent_tracks(&subgrid_span, parent_context)
+        .map_err(|e| SubgridError::CoordinationFailed { details: e.to_string() })?;
+
+    // Step 4: Convert to Taffy track sizing functions
+    use super::grid_coordination::helpers::convert_internal_to_taffy_sizing_function;
+
+    let row_track_functions: Vec<taffy::TrackSizingFunction> = inherited_tracks
+        .row_sizing_functions
+        .iter()
+        .filter_map(|f| {
+            convert_internal_to_taffy_sizing_function(f)
+                .map_err(|e| {
+                    #[cfg(feature = "tracing")]
+                    tracing::warn!(
+                        "Failed to convert row track sizing function for subgrid {}: {}",
+                        usize::from(subgrid_id),
+                        e
+                    );
+                    e
+                })
+                .ok()
+        })
+        .collect();
+
+    let column_track_functions: Vec<taffy::TrackSizingFunction> = inherited_tracks
+        .column_sizing_functions
+        .iter()
+        .filter_map(|f| {
+            convert_internal_to_taffy_sizing_function(f)
+                .map_err(|e| {
+                    #[cfg(feature = "tracing")]
+                    tracing::warn!(
+                        "Failed to convert column track sizing function for subgrid {}: {}",
+                        usize::from(subgrid_id),
+                        e
+                    );
+                    e
+                })
+                .ok()
+        })
+        .collect();
+
+    // Step 5: Apply to node's Style - requires BaseDocument access
+    let base_doc = (tree as &mut dyn std::any::Any)
+        .downcast_mut::<crate::BaseDocument>()
+        .ok_or_else(|| SubgridError::StyleAccess {
+            node_id: usize::from(subgrid_id),
+            reason: "Failed to downcast tree to BaseDocument for style update".to_string(),
+        })?;
+
+    let node = base_doc.node_from_id_mut(subgrid_id);
+    let style = node.style_mut();
+
+    // Convert TrackSizingFunction to GridTemplateComponent::Single
+    if !row_track_functions.is_empty() {
+        style.grid_template_rows = row_track_functions
+            .iter()
+            .map(|track| taffy::GridTemplateComponent::Single(*track))
+            .collect();
+
+        #[cfg(feature = "tracing")]
+        tracing::debug!(
+            "Applied {} inherited row tracks to subgrid node {}",
+            style.grid_template_rows.len(),
+            usize::from(subgrid_id)
+        );
+    }
+
+    if !column_track_functions.is_empty() {
+        style.grid_template_columns = column_track_functions
+            .iter()
+            .map(|track| taffy::GridTemplateComponent::Single(*track))
+            .collect();
+
+        #[cfg(feature = "tracing")]
+        tracing::debug!(
+            "Applied {} inherited column tracks to subgrid node {}",
+            style.grid_template_columns.len(),
+            usize::from(subgrid_id)
+        );
+    }
+
+    // Increment style generation to invalidate cache
+    node.style_generation.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+
+    // Step 6: Setup line name mapping for subgrid items
+    let line_name_mapping = coordinator.setup_line_name_mapping(subgrid_id, parent_context)
+        .map_err(|e| SubgridError::CoordinationFailed { details: e.to_string() })?;
+
+    // Store in coordination state for nested subgrid inheritance
+    coordination.line_name_mappings.push(line_name_mapping);
+
+    // Step 7: Update coordination state - track the subgrid in the chain
+    coordination.subgrid_chain.push(subgrid_id);
+
     Ok(())
 }
 
