@@ -105,8 +105,8 @@ impl FontMetricsCache {
         
         // Use Goldylox with proper types (both FontMetricsCacheKey and FontMetrics implement required traits)
         let cache = GoldyloxBuilder::<FontMetricsCacheKey, FontMetrics>::new()
-            .memory_capacity(8 * 1024 * 1024) // 8MB for font metrics
-            .disk_cache(None) // In-memory only for font metrics (lightweight data)
+            .hot_tier_memory_limit_mb(8) // 8MB for font metrics
+            .cold_tier_max_size_bytes(0) // In-memory only for font metrics (lightweight data)
             .build()?;
             
         let cache_type = CacheType::Goldylox(cache);

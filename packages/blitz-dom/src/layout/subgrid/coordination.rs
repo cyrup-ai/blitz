@@ -7,6 +7,7 @@ use taffy::prelude::*;
 
 use super::super::grid_context::ParentGridContext;
 use super::super::grid_errors::{SubgridError, SubgridResult};
+use super::super::grid_coordination::types::LineNameMap;
 use super::types::*;
 
 /// Nested subgrid coordination state and results
@@ -26,7 +27,7 @@ pub struct NestedSubgridCoordination {
     /// All item contributions mapped to root parent coordinates
     pub item_contributions: Vec<TrackSizingContribution>,
     /// Line name mappings through the inheritance chain
-    pub line_name_mappings: Vec<LineNameMapping>,
+    pub line_name_mappings: Vec<LineNameMap>,
 }
 
 impl NestedSubgridCoordination {

@@ -136,7 +136,7 @@ unsafe fn compute_flags_sse2(glyph: &LayoutGlyph, run: &LayoutRun) -> GlyphFlags
     }
 
     // Additional script-specific analysis
-    if is_cursive_script(glyph) {
+    if is_cursive_script(glyph, run) {
         flags |= GlyphFlags::CURSIVE_CONNECTION;
     }
 
@@ -178,7 +178,7 @@ fn compute_flags_scalar(glyph: &LayoutGlyph, run: &LayoutRun) -> GlyphFlags {
     }
 
     // Script-specific analysis
-    if is_cursive_script(glyph) {
+    if is_cursive_script(glyph, run) {
         flags |= GlyphFlags::CURSIVE_CONNECTION;
     }
 
@@ -199,17 +199,12 @@ fn compute_flags_scalar(glyph: &LayoutGlyph, run: &LayoutRun) -> GlyphFlags {
 
 /// Check if glyph belongs to a cursive script
 #[inline]
-fn is_cursive_script(glyph: &LayoutGlyph) -> bool {
-    // Simple heuristic based on common cursive script ranges
-    // In production, this would check the actual script property
-    let codepoint = glyph.glyph_id;
-    matches!(
-        codepoint,
-        0x0600..=0x06FF | // Arabic
-        0x0750..=0x077F | // Arabic Supplement
-        0x08A0..=0x08FF | // Arabic Extended-A
-        0x0700..=0x074F   // Syriac
-    )
+fn is_cursive_script(glyph: &LayoutGlyph, run: &LayoutRun) -> bool {
+    use crate::features::FeatureLookup;
+    
+    // Get script from the run's metadata
+    let script = run.script;
+    FeatureLookup::is_cursive_script(script)
 }
 
 /// Check if glyph is a component of a larger character
@@ -226,7 +221,7 @@ fn is_tatweel_safe(glyph: &LayoutGlyph, run: &LayoutRun) -> bool {
     // Tatweel (kashida) can only be inserted between connecting Arabic letters
     // This is a simplified check - full implementation would analyze
     // the actual Arabic shaping context
-    if !is_cursive_script(glyph) {
+    if !is_cursive_script(glyph, run) {
         return false;
     }
 

@@ -115,4 +115,48 @@ impl FeatureLookup {
     pub const fn requires_mark_positioning(script: Script) -> bool {
         !matches!(script, Script::Latin | Script::Cyrillic | Script::Greek)
     }
+
+    /// Check if script uses cursive/contextual joining (compile-time constant)
+    /// 
+    /// Cursive scripts have letters that change form based on their position in a word
+    /// (isolated, initial, medial, final). These scripts require special handling for
+    /// glyph connection and shaping.
+    /// 
+    /// Covered scripts and their Unicode blocks:
+    /// - Arabic (U+0600-U+06FF, U+0750-U+077F, U+08A0-U+08FF)
+    /// - Syriac (U+0700-U+074F, U+0860-U+086F)
+    /// - Mongolian (U+1800-U+18AF) - Traditional vertical script
+    /// - Nko (U+07C0-U+07FF) - West African N'Ko
+    /// - Mandaic (U+0840-U+085F) - Mandaean script
+    /// - Phags_Pa (U+A840-U+A877) - Historical Phags-pa
+    /// - Manichaean (U+10AC0-U+10AFF) - Historical Manichaean
+    /// - Psalter_Pahlavi (U+10B80-U+10BAF) - Psalter Pahlavi
+    /// - Hanifi_Rohingya (U+10D00-U+10D3F) - Hanifi Rohingya
+    /// - Sogdian (U+10F30-U+10F6F) - Sogdian script
+    /// - Old_Sogdian (U+10F00-U+10F2F) - Old Sogdian
+    /// - Adlam (U+1E900-U+1E95F) - West African Adlam
+    /// - Chorasmian (U+10FB0-U+10FCF) - Chorasmian
+    /// - Elymaic (U+10FE0-U+10FFF) - Elymaic
+    /// - Old_Uyghur (U+10F70-U+10FAF) - Old Uyghur
+    #[inline]
+    pub const fn is_cursive_script(script: Script) -> bool {
+        matches!(
+            script,
+            Script::Adlam
+                | Script::Arabic
+                | Script::Chorasmian
+                | Script::Elymaic
+                | Script::Hanifi_Rohingya
+                | Script::Mandaic
+                | Script::Manichaean
+                | Script::Mongolian
+                | Script::Nko
+                | Script::Old_Sogdian
+                | Script::Old_Uyghur
+                | Script::Phags_Pa
+                | Script::Psalter_Pahlavi
+                | Script::Sogdian
+                | Script::Syriac
+        )
+    }
 }

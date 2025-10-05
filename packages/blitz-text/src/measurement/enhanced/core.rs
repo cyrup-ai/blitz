@@ -295,13 +295,13 @@ impl EnhancedTextMeasurer {
         let baseline_total = baseline_hits + baseline_misses;
         
         MeasurementStats {
-            cache_hits,
-            cache_misses,
-            total_measurements: TOTAL_MEASUREMENTS.load(Ordering::Relaxed),
-            font_metrics_cache_hits: font_metrics_hits,
-            font_metrics_cache_misses: font_metrics_misses,
-            baseline_cache_hits: baseline_hits,
-            baseline_cache_misses: baseline_misses,
+            cache_hits: cache_hits as u64,
+            cache_misses: cache_misses as u64,
+            total_measurements: TOTAL_MEASUREMENTS.load(Ordering::Relaxed) as u64,
+            font_metrics_cache_hits: font_metrics_hits as u64,
+            font_metrics_cache_misses: font_metrics_misses as u64,
+            baseline_cache_hits: baseline_hits as u64,
+            baseline_cache_misses: baseline_misses as u64,
             evictions: 0, // Goldylox manages this internally
             current_cache_size: 0, // Can query from cache if needed
             hit_rate: if total > 0 { cache_hits as f32 / total as f32 } else { 0.0 },

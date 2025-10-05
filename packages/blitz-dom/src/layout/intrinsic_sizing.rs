@@ -198,12 +198,13 @@ fn estimate_text_size(
             // Use the measurement API which handles caching internally
             use blitz_text::measurement::*;
             
-            // Create cache manager with fallback
-            let cache_manager_result = UnifiedCacheManager::new();
-            let default_cache = UnifiedCacheManager::default();
-            let cache_manager = match cache_manager_result {
+            // Try to create cache manager
+            let cache_manager = match UnifiedCacheManager::new() {
                 Ok(cm) => cm,
-                Err(_) => default_cache,
+                Err(_) => {
+                    // Cache creation failed - return error to trigger fallback
+                    return Err(MeasurementError::FontSystemError);
+                }
             };
             
             perform_measurement(
@@ -241,7 +242,7 @@ fn estimate_text_size(
             }
         }
         _ => {
-            // Fallback when text system unavailable
+            // Fallback when text system unavailable or measurement fails
             // Use font size for basic estimation (much better than hardcoded 8.0/16.0)
             let chars_per_line = if let Some(limit) = max_width {
                 (limit / (font_size * 0.6)).max(1.0) as usize
