@@ -13,6 +13,9 @@ use crate::layout::grid_errors::GridPreprocessingError;
 use crate::layout::replaced::{ReplacedContext, replaced_measure_function};
 use crate::layout::stylo_to_blitz::TextCollapseMode;
 use crate::node::{Node, NodeData};
+use blitz_text::measurement::types::FontMetrics;
+use blitz_text::measurement::font_metrics::extract_font_metrics;
+use blitz_text::cosmyc_types::fontdb;
 
 /// Calculate proper intrinsic size for masonry items using CSS specifications
 /// Replaces all hardcoded 200.0px/100.0px fallbacks with standards-compliant sizing
@@ -151,14 +154,14 @@ fn estimate_text_size(
     let node = tree.node_from_id(item_id.into());
 
     // Extract font information from computed styles
-    let (font_size, font_family) = if let Some(computed_styles) = node.primary_styles() {
+    let styles_opt = node.primary_styles();
+    let (font_size, line_height, font_family): (f32, f32, &str) = if let Some(computed_styles) = styles_opt.as_ref() {
         let font = computed_styles.get_font();
-        
-        // Extract font size
+
         let font_size_px = font.font_size.computed_size.px();
-        
-        // Extract font family
-        let family = match font.font_family.families.iter().next() {
+
+        // Extract font family first (needed for metric-based line-height calculation)
+        let family: &str = match font.font_family.families.iter().next() {
             Some(family) => {
                 use style::values::computed::font::SingleFontFamily;
                 match family {
@@ -178,11 +181,21 @@ fn estimate_text_size(
             }
             None => "sans-serif",
         };
-        
-        (font_size_px, family)
+
+        // Calculate line-height using CSS spec-compliant methods
+        let line_height_px = match font.line_height {
+            style::values::computed::LineHeight::Normal => {
+                // CSS spec: use font metrics for 'normal' (CSS Inline Layout Module Level 3)
+                let font_metrics = extract_font_metrics_fallback(tree, family, font_size_px);
+                calculate_line_height_from_metrics(&font_metrics, font_size_px, 0.0)
+            },
+            style::values::computed::LineHeight::Number(number) => font_size_px * number.0,
+            style::values::computed::LineHeight::Length(length) => length.px(),
+        };
+
+        (font_size_px, line_height_px, family)
     } else {
-        // Fallback when no styles available
-        (16.0, "sans-serif")
+        (16.0, 16.0 * 1.2, "sans-serif")
     };
 
     // Calculate max_width for text wrapping based on available space
@@ -194,66 +207,74 @@ fn estimate_text_size(
 
     // Use text measurement system for accurate sizing
     let measurement_result = tree.with_text_system(|text_system| {
-        text_system.with_font_system(|_font_system| {
-            // Use the measurement API which handles caching internally
-            use blitz_text::measurement::*;
+        text_system.with_font_system(|font_system| {
+            use blitz_text::cosmyc_types::{EnhancedBuffer, Attrs, Metrics, Family, Shaping};
             
-            // Try to create cache manager
-            let cache_manager = match UnifiedCacheManager::new() {
-                Ok(cm) => cm,
-                Err(_) => {
-                    // Cache creation failed - return error to trigger fallback
-                    return Err(MeasurementError::FontSystemError);
+            // Create temporary buffer for measurement
+            let metrics = Metrics::new(font_size, line_height);
+            let attrs = Attrs::new()
+                .family(Family::Name(&font_family))
+                .metrics(metrics);
+            
+            let mut buffer = EnhancedBuffer::new(font_system, metrics);
+            buffer.set_text_cached(font_system, text_content, &attrs, Shaping::Advanced);
+            
+            // Set buffer width based on available space for proper line wrapping
+            if let Some(limit) = max_width {
+                buffer.set_size_cached(font_system, Some(limit), None);
+            }
+            
+            // Calculate dimensions based on AvailableSpace
+            let (width, height) = match inputs.available_space.width {
+                AvailableSpace::MinContent => {
+                    let min_width = buffer.css_min_content_width(font_system);
+                    // Get height from inner buffer's layout line count
+                    let line_count = buffer.inner().layout_runs().count();
+                    let height = line_count as f32 * line_height;
+                    (min_width, height)
+                }
+                AvailableSpace::MaxContent => {
+                    let max_width = buffer.css_max_content_width(font_system);
+                    let line_count = buffer.inner().layout_runs().count();
+                    let height = line_count as f32 * line_height;
+                    (max_width, height)
+                }
+                AvailableSpace::Definite(_) => {
+                    // Use actual laid-out dimensions from inner buffer
+                    let width = buffer.inner().layout_runs()
+                        .map(|run| run.line_w)
+                        .fold(0.0f32, f32::max);
+                    let line_count = buffer.inner().layout_runs().count();
+                    let height = line_count as f32 * line_height;
+                    (width, height)
                 }
             };
             
-            perform_measurement(
-                text_content,
-                font_size,
-                max_width,
-                font_family,
-                CSSBaseline::Alphabetic,
-                &cache_manager,
-            )
+            Ok::<(f32, f32), ()>((width, height))
         })
     });
 
-    // Extract dimensions from measurement or use fallback
+    // Extract dimensions or use fallback
     let (width, height) = match measurement_result {
-        Ok(Ok(measurement)) => {
-            // Use actual measured dimensions
-            match inputs.available_space.width {
-                AvailableSpace::MinContent => {
-                    // For min-content, use longest word width
-                    let min_width = measurement.line_measurements
-                        .iter()
-                        .map(|line| line.width)
-                        .fold(0.0, f32::max);
-                    (min_width.max(50.0), measurement.content_height)
-                }
-                AvailableSpace::MaxContent => {
-                    // For max-content, use full unwrapped width
-                    (measurement.content_width, measurement.content_height)
-                }
-                AvailableSpace::Definite(_limit) => {
-                    // For definite, use wrapped dimensions
-                    (measurement.content_width, measurement.content_height)
-                }
-            }
-        }
+        Ok(Ok((w, h))) => (w, h),
         _ => {
-            // Fallback when text system unavailable or measurement fails
-            // Use font size for basic estimation (much better than hardcoded 8.0/16.0)
+            // Fallback: Use real font metrics
+            let font_metrics = extract_font_metrics_fallback(tree, &font_family, font_size);
+
+            // Calculate actual average character width from font metrics
+            let avg_char_width = font_metrics.average_char_width * (font_size / font_metrics.units_per_em as f32);
+
             let chars_per_line = if let Some(limit) = max_width {
-                (limit / (font_size * 0.6)).max(1.0) as usize
+                (limit / avg_char_width).max(1.0) as usize
             } else {
                 text_content.len()
             };
-            
+
             let lines = (text_content.len() as f32 / chars_per_line as f32).ceil().max(1.0);
-            let width = (chars_per_line.min(text_content.len()) as f32 * font_size * 0.6)
-                .max(font_size); // At least one char wide
-            let height = lines * font_size * 1.2; // Standard line height multiplier
+            let width = (chars_per_line.min(text_content.len()) as f32 * avg_char_width)
+                .max(font_size);
+
+            let height = lines * line_height;
             
             (width, height)
         }
@@ -431,4 +452,124 @@ fn apply_size_constraints(
         width: fallback_width,
         height: fallback_height,
     })
+}
+
+/// Resolve font family to actual font ID with fallback chain
+fn resolve_font_with_fallback(
+    tree: &BaseDocument,
+    font_family: &str,
+    _font_size: f32,
+) -> Result<(fontdb::ID, FontMetrics), GridPreprocessingError> {
+    tree.with_text_system(|text_system| {
+        text_system.with_font_system(|font_system| {
+            // Create query for font family
+            let query = fontdb::Query {
+                families: &[fontdb::Family::Name(font_family)],
+                weight: fontdb::Weight::NORMAL,
+                stretch: fontdb::Stretch::Normal,
+                style: fontdb::Style::Normal,
+            };
+            
+            // Resolve to font ID (with automatic fallback to sans-serif)
+            let font_id = font_system.db().query(&query)
+                .or_else(|| {
+                    let fallback_query = fontdb::Query {
+                        families: &[fontdb::Family::SansSerif],
+                        ..query
+                    };
+                    font_system.db().query(&fallback_query)
+                })
+                .ok_or_else(|| GridPreprocessingError::PreprocessingFailed {
+                    operation: "font_resolution".to_string(),
+                    node_id: 0,
+                    details: format!("Failed to resolve font: {}", font_family),
+                })?;
+            
+            // Extract metrics for resolved font
+            let metrics = extract_font_metrics(font_system, font_id)
+                .map_err(|_| GridPreprocessingError::PreprocessingFailed {
+                    operation: "extract_font_metrics".to_string(),
+                    node_id: 0,
+                    details: "Failed to extract font metrics".to_string(),
+                })?;
+            
+            Ok((font_id, metrics))
+        })
+    }).unwrap_or_else(|_| {
+        Err(GridPreprocessingError::PreprocessingFailed {
+            operation: "text_system_access".to_string(),
+            node_id: 0,
+            details: "Failed to access text system".to_string(),
+        })
+    })
+}
+
+/// Extract font metrics for fallback path (simplified)
+pub(crate) fn extract_font_metrics_fallback(
+    tree: &BaseDocument,
+    font_family: &str,
+    font_size: f32,
+) -> FontMetrics {
+    // Try to get real metrics
+    if let Ok((_, metrics)) = resolve_font_with_fallback(tree, font_family, font_size) {
+        return metrics;
+    }
+    
+    // Ultimate fallback: reasonable defaults based on typical font proportions
+    FontMetrics {
+        units_per_em: 1000,
+        ascent: 800,
+        descent: -200,
+        line_gap: 90,
+        x_height: Some(500),
+        cap_height: Some(700),
+        ideographic_baseline: Some(-120),
+        hanging_baseline: Some(720),
+        mathematical_baseline: Some(250),
+        average_char_width: 500.0, // Will be scaled by font_size / units_per_em
+        max_char_width: 1000.0,
+        underline_position: -100.0,
+        underline_thickness: 50.0,
+        strikethrough_position: 300.0,
+        strikethrough_thickness: 50.0,
+    }
+}
+
+/// Calculate line height from font metrics following CSS spec
+#[inline]
+pub(crate) fn calculate_line_height_from_metrics(
+    font_metrics: &FontMetrics,
+    font_size: f32,
+    css_line_height: f32,
+) -> f32 {
+    // If CSS line-height is valid, use it; otherwise calculate from metrics
+    if css_line_height > 0.0 {
+        css_line_height
+    } else {
+        // Use raw metrics calculation for consistency
+        calculate_line_height_from_raw_metrics(
+            font_metrics.ascent,
+            font_metrics.descent,
+            font_metrics.line_gap,
+            font_size,
+            font_metrics.units_per_em,
+        )
+    }
+}
+
+/// Calculate line height from raw font metric values
+#[inline]
+pub(crate) fn calculate_line_height_from_raw_metrics(
+    ascent: i16,
+    descent: i16,
+    line_gap: i16,
+    font_size: f32,
+    units_per_em: u16,
+) -> f32 {
+    let scale = font_size / units_per_em as f32;
+    let ascent_px = ascent as f32 * scale;
+    let descent_px = descent.abs() as f32 * scale;
+    let line_gap_px = line_gap as f32 * scale;
+    
+    ascent_px + descent_px + line_gap_px
 }

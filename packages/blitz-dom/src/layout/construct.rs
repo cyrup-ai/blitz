@@ -996,6 +996,31 @@ pub(crate) fn build_inline_layout(
     }));
     println!("🔍 build_inline_layout: Node {} text_system result: {:?}", inline_context_root_node_id, result);
 
+    // Extract text alignment from CSS styles
+    let alignment = root_node_style
+        .as_ref()
+        .map(|s| {
+            use style::values::specified::TextAlignKeyword;
+            match s.clone_text_align() {
+                TextAlignKeyword::Start
+                | TextAlignKeyword::Left
+                | TextAlignKeyword::MozLeft => blitz_text::Align::Left,
+                TextAlignKeyword::Right | TextAlignKeyword::MozRight => {
+                    blitz_text::Align::Right
+                }
+                TextAlignKeyword::Center | TextAlignKeyword::MozCenter => {
+                    blitz_text::Align::Center
+                }
+                TextAlignKeyword::Justify => blitz_text::Align::Justified,
+                TextAlignKeyword::End => blitz_text::Align::Right,
+            }
+        });
+
+    // Apply alignment to all buffer lines
+    buffer.inner_mut().lines.iter_mut().for_each(|line| {
+        line.set_align(alignment);
+    });
+
     // Obtain layout children for the inline layout
     let mut layout_children: Vec<usize> = Vec::new();
 

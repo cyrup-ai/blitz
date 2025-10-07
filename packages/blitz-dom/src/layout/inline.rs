@@ -154,7 +154,7 @@ impl BaseDocument {
                     };
                 }
 
-                let _alignment = self.nodes[node_id]
+                let alignment = self.nodes[node_id]
                     .primary_styles()
                     .map(|s| {
                         use style::values::specified::TextAlignKeyword;
@@ -175,10 +175,11 @@ impl BaseDocument {
                     })
                     .unwrap_or(CosmicAlign::Left);
 
-                // Set alignment in cosmyc-text buffer
-                // Note: cosmyc-text handles alignment differently - it's set when creating the buffer
-                // For existing buffer, we would need to recreate it with new alignment
-                // For now, we'll track the alignment for future buffer operations
+                // Apply alignment to all lines in the buffer
+                // BufferLine::set_align() automatically resets layout if alignment differs
+                inline_layout.layout.inner_mut().lines.iter_mut().for_each(|line| {
+                    line.set_align(Some(alignment));
+                });
 
                 // Store sizes and positions of inline boxes
                 // Updated for cosmyc-text system - iterate through inline_layout.inline_boxes

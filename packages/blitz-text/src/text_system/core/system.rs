@@ -50,15 +50,27 @@ pub struct UnifiedTextSystem {
 impl UnifiedTextSystem {
     /// Measure text with given attributes and constraints
     pub fn measure_text(
-        &mut self,
+        &self,
         text: &str,
         attrs: Attrs,
         max_width: Option<f32>,
         _max_height: Option<f32>,
     ) -> TextSystemResult<TextMeasurement> {
+        use crate::measurement::types::measurement_request::TextDirection;
+        
+        // Extract font family from attrs (family is not Option, always present)
+        let font_family = Some(match attrs.family {
+            cosmyc_text::Family::Name(name) => name.to_string(),
+            cosmyc_text::Family::Serif => "serif".to_string(),
+            cosmyc_text::Family::SansSerif => "sans-serif".to_string(),
+            cosmyc_text::Family::Monospace => "monospace".to_string(),
+            cosmyc_text::Family::Cursive => "cursive".to_string(),
+            cosmyc_text::Family::Fantasy => "fantasy".to_string(),
+        });
+
         let request = crate::measurement::types::measurement_request::MeasurementRequest {
             text: text.to_string(),
-            font_id: 0, // Default font ID
+            font_id: 0,
             font_size: attrs
                 .metrics_opt
                 .map(|m| cosmyc_text::Metrics::from(m).font_size)
@@ -66,7 +78,8 @@ impl UnifiedTextSystem {
             max_width,
             enable_shaping: true,
             language: None,
-            direction: None,
+            direction: Some(TextDirection::Auto),
+            font_family,
         };
         self.text_measurer
             .measure_text(&request)

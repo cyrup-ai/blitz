@@ -3,10 +3,7 @@
 //! This module contains measurement-specific operations that were extracted
 //! from the original core implementation for better modularity.
 
-use std::cell::RefCell;
-use std::time::Instant;
-
-use cosmyc_text::{Attrs, Buffer, FontSystem, Metrics};
+use cosmyc_text::{Attrs, Metrics};
 
 use super::UnifiedTextSystem;
 use crate::measurement::TextMeasurement;
@@ -15,80 +12,78 @@ use crate::text_system::config::TextSystemResult;
 impl UnifiedTextSystem {
     /// Measure text with advanced typography features
     pub fn measure_text_advanced(
-        &mut self,
+        &self,
         text: &str,
         attrs: Attrs,
-        _max_width: Option<f32>,
+        max_width: Option<f32>,
         _max_height: Option<f32>,
     ) -> TextSystemResult<TextMeasurement> {
-        let start_time = Instant::now();
+        use crate::measurement::types::measurement_request::TextDirection;
+        
+        // Extract font family from attrs
+        let font_family = Some(match attrs.family {
+            cosmyc_text::Family::Name(name) => name.to_string(),
+            cosmyc_text::Family::Serif => "serif".to_string(),
+            cosmyc_text::Family::SansSerif => "sans-serif".to_string(),
+            cosmyc_text::Family::Monospace => "monospace".to_string(),
+            cosmyc_text::Family::Cursive => "cursive".to_string(),
+            cosmyc_text::Family::Fantasy => "fantasy".to_string(),
+        });
 
-        // Get thread-local font system
-        let font_system = self.font_system.get_or(|| RefCell::new(FontSystem::new()));
-        let mut font_system = font_system.borrow_mut();
+        // Extract font size from attrs
+        let font_size = attrs
+            .metrics_opt
+            .map(|m| cosmyc_text::Metrics::from(m).font_size)
+            .unwrap_or(14.0);
 
-        // Create temporary buffer for measurement
-        let mut buffer = Buffer::new(&mut *font_system, Metrics::new(14.0, 20.0));
-        buffer.set_text(
-            &mut *font_system,
-            text,
-            &attrs,
-            cosmyc_text::Shaping::Advanced,
-        );
+        // Build measurement request
+        let request = crate::measurement::types::measurement_request::MeasurementRequest {
+            text: text.to_string(),
+            font_id: 0,
+            font_size,
+            max_width,
+            enable_shaping: true,
+            language: None,
+            direction: Some(TextDirection::Auto),
+            font_family,
+        };
 
-        // Run layout
-        buffer.shape_until_scroll(&mut *font_system, false);
-
-        let measurement_time = start_time.elapsed();
-
-        // Extract measurements from buffer
-        let lines: Vec<_> = buffer.layout_runs().collect();
-        let total_height = lines.len() as f32 * buffer.metrics().line_height;
-        let max_width_actual = lines.iter().map(|line| line.line_w).fold(0.0f32, f32::max);
-
-        // Update performance stats
-        self.performance_monitor
-            .record_measurement_time(measurement_time);
-
-        Ok(TextMeasurement {
-            content_width: max_width_actual,
-            content_height: total_height,
-            line_height: buffer.metrics().line_height,
-            baseline: buffer.metrics().line_height * 0.8,
-            ascent: buffer.metrics().line_height * 0.8,
-            descent: buffer.metrics().line_height * 0.2,
-            line_gap: 0.0,
-            x_height: buffer.metrics().line_height * 0.5,
-            cap_height: buffer.metrics().line_height * 0.7,
-            advance_width: max_width_actual,
-            bounds: crate::measurement::types::bounds_types::TextBounds::default(),
-            line_measurements: Vec::new(),
-            total_character_count: text.len(),
-            baseline_offset: 0.0,
-            measured_at: std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_millis() as u64,
-        })
+        // Delegate to proper measurement system (uses perform_measurement internally)
+        self.text_measurer
+            .measure_text(&request)
+            .map_err(|e| crate::text_system::config::TextSystemError::Measurement(e))
     }
 
     /// Quick measurement for simple text
     pub fn measure_text_simple(
-        &mut self,
+        &self,
         text: &str,
         font_size: f32,
         max_width: Option<f32>,
     ) -> TextSystemResult<TextMeasurement> {
-        let attrs = Attrs::new().metadata(font_size as usize);
+        // Use proper Metrics construction
+        let attrs = Attrs::new().metrics(cosmyc_text::Metrics::new(font_size, font_size * 1.4));
 
-        self.measure_text_advanced(text, attrs, max_width, None)
+        // Delegate to measure_text (not measure_text_advanced)
+        self.measure_text(text, attrs, max_width, None)
     }
 
     /// Measure single line of text
-    pub fn measure_line(&mut self, text: &str, attrs: Attrs) -> TextSystemResult<f32> {
+    pub fn measure_line(&self, text: &str, attrs: Attrs) -> TextSystemResult<f32> {
+        use crate::measurement::types::measurement_request::TextDirection;
+        
+        let font_family = Some(match attrs.family {
+            cosmyc_text::Family::Name(name) => name.to_string(),
+            cosmyc_text::Family::Serif => "serif".to_string(),
+            cosmyc_text::Family::SansSerif => "sans-serif".to_string(),
+            cosmyc_text::Family::Monospace => "monospace".to_string(),
+            cosmyc_text::Family::Cursive => "cursive".to_string(),
+            cosmyc_text::Family::Fantasy => "fantasy".to_string(),
+        });
+        
         let request = crate::measurement::types::measurement_request::MeasurementRequest {
             text: text.to_string(),
-            font_id: 0, // Default font ID
+            font_id: 0,
             font_size: attrs
                 .metrics_opt
                 .map(|m| cosmyc_text::Metrics::from(m).font_size)
@@ -96,7 +91,8 @@ impl UnifiedTextSystem {
             max_width: None,
             enable_shaping: true,
             language: None,
-            direction: None,
+            direction: Some(TextDirection::Auto),
+            font_family,
         };
         let measurement = self
             .text_measurer
@@ -105,8 +101,8 @@ impl UnifiedTextSystem {
         Ok(measurement.content_width)
     }
 
-    /// Get metrics for current font configuration
+    /// Get metrics for current font configuration (uses standard 1.4 line height multiplier)
     pub fn get_font_metrics(&self, font_size: f32) -> Metrics {
-        Metrics::new(font_size, font_size * 1.4)
+        Metrics::new(font_size, font_size * 1.4)  // Standard CSS default
     }
 }

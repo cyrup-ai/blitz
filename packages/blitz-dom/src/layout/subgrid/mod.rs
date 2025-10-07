@@ -108,54 +108,19 @@ where
     use super::grid_coordination::types::GridLayoutCoordinator;
 
     // Step 1: Create coordinator for this subgrid level
-    let coordinator = GridLayoutCoordinator::default();
+    let mut coordinator = GridLayoutCoordinator::default();
 
     // Step 2: Determine subgrid span in parent
-    let subgrid_span = coordinator.determine_subgrid_span(subgrid_id, parent_context)
+    let subgrid_span = coordinator.determine_subgrid_span(subgrid_id, parent_context, tree)
         .map_err(|e| SubgridError::CoordinationFailed { details: e.to_string() })?;
 
     // Step 3: Extract parent tracks for this span
     let inherited_tracks = coordinator.extract_parent_tracks(&subgrid_span, parent_context)
         .map_err(|e| SubgridError::CoordinationFailed { details: e.to_string() })?;
 
-    // Step 4: Convert to Taffy track sizing functions
-    use super::grid_coordination::helpers::convert_internal_to_taffy_sizing_function;
-
-    let row_track_functions: Vec<taffy::TrackSizingFunction> = inherited_tracks
-        .row_sizing_functions
-        .iter()
-        .filter_map(|f| {
-            convert_internal_to_taffy_sizing_function(f)
-                .map_err(|e| {
-                    #[cfg(feature = "tracing")]
-                    tracing::warn!(
-                        "Failed to convert row track sizing function for subgrid {}: {}",
-                        usize::from(subgrid_id),
-                        e
-                    );
-                    e
-                })
-                .ok()
-        })
-        .collect();
-
-    let column_track_functions: Vec<taffy::TrackSizingFunction> = inherited_tracks
-        .column_sizing_functions
-        .iter()
-        .filter_map(|f| {
-            convert_internal_to_taffy_sizing_function(f)
-                .map_err(|e| {
-                    #[cfg(feature = "tracing")]
-                    tracing::warn!(
-                        "Failed to convert column track sizing function for subgrid {}: {}",
-                        usize::from(subgrid_id),
-                        e
-                    );
-                    e
-                })
-                .ok()
-        })
-        .collect();
+    // Step 4: Convert to Taffy track sizing functions and get ReplacedGridTemplates
+    let replaced_templates = coordinator.replace_grid_template_properties(subgrid_id, &inherited_tracks)
+        .map_err(|e| SubgridError::CoordinationFailed { details: e.to_string() })?;
 
     // Step 5: Apply to node's Style - requires BaseDocument access
     let base_doc = (tree as &mut dyn std::any::Any)
@@ -168,9 +133,9 @@ where
     let node = base_doc.node_from_id_mut(subgrid_id);
     let style = node.style_mut();
 
-    // Convert TrackSizingFunction to GridTemplateComponent::Single
-    if !row_track_functions.is_empty() {
-        style.grid_template_rows = row_track_functions
+    // Apply row templates
+    if !replaced_templates.row_functions.is_empty() {
+        style.grid_template_rows = replaced_templates.row_functions
             .iter()
             .map(|track| taffy::GridTemplateComponent::Single(*track))
             .collect();
@@ -183,8 +148,9 @@ where
         );
     }
 
-    if !column_track_functions.is_empty() {
-        style.grid_template_columns = column_track_functions
+    // Apply column templates
+    if !replaced_templates.column_functions.is_empty() {
+        style.grid_template_columns = replaced_templates.column_functions
             .iter()
             .map(|track| taffy::GridTemplateComponent::Single(*track))
             .collect();
@@ -201,7 +167,7 @@ where
     node.style_generation.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 
     // Step 6: Setup line name mapping for subgrid items
-    let line_name_mapping = coordinator.setup_line_name_mapping(subgrid_id, parent_context)
+    let line_name_mapping = coordinator.setup_line_name_mapping(subgrid_id, parent_context, tree)
         .map_err(|e| SubgridError::CoordinationFailed { details: e.to_string() })?;
 
     // Store in coordination state for nested subgrid inheritance
@@ -210,19 +176,90 @@ where
     // Step 7: Update coordination state - track the subgrid in the chain
     coordination.subgrid_chain.push(subgrid_id);
 
+    // Step 8: Build TrackInheritanceLevel for coordinate transformation
+    let coordinate_transform = CoordinateTransform {
+        // Calculate row offset: convert 1-based grid line to 0-based track index
+        // Example: subgrid at rows 3-6 has offset 2, so local track 0 → parent track 2
+        row_offset: (subgrid_span.row_start - 1).max(0) as usize,
+        column_offset: (subgrid_span.column_start - 1).max(0) as usize,
+        row_scale: 1.0,    // Subgrids use 1:1 scaling per CSS Grid spec
+        column_scale: 1.0, // Subgrids use 1:1 scaling per CSS Grid spec
+    };
+
+    // Convert GridArea (i32 fields) to SubgridSpan (usize fields)
+    let row_span = SubgridSpan {
+        start: subgrid_span.row_start as usize,
+        end: subgrid_span.row_end as usize,
+    };
+    let column_span = SubgridSpan {
+        start: subgrid_span.column_start as usize,
+        end: subgrid_span.column_end as usize,
+    };
+
+    let inheritance_level = TrackInheritanceLevel {
+        subgrid_id,
+        parent_subgrid_id: None, // Implicitly determined by chain position
+        row_span_in_parent: Some(row_span),
+        column_span_in_parent: Some(column_span),
+        coordinate_transform,
+    };
+
+    // Add to inheritance chain for multi-level coordinate transformation
+    coordination.track_inheritance_chain.push(inheritance_level);
+
     Ok(())
 }
 
 /// Discover child subgrids within a parent subgrid
 fn discover_child_subgrids<Tree>(
-    _tree: &Tree,
-    _parent_id: taffy::prelude::NodeId,
+    tree: &Tree,
+    parent_id: taffy::prelude::NodeId,
 ) -> SubgridResult<Vec<taffy::prelude::NodeId>>
 where
     Tree: taffy::LayoutGridContainer + taffy::TraversePartialTree + 'static,
 {
-    // Simplified implementation - would traverse children in full version
-    Ok(Vec::new())
+    use style::values::specified::box_::DisplayInside;
+
+    // Downcast to BaseDocument to access Stylo computed styles
+    // Note: Read-only access, so use &dyn not &mut dyn
+    let base_doc = (tree as &dyn std::any::Any)
+        .downcast_ref::<crate::BaseDocument>()
+        .ok_or_else(|| SubgridError::StyleAccess {
+            node_id: usize::from(parent_id),
+            reason: "Failed to downcast tree to BaseDocument for child discovery".to_string(),
+        })?;
+
+    let mut child_subgrids = Vec::new();
+
+    // Iterate through all children using Taffy's TraversePartialTree API
+    for child_id in tree.child_ids(parent_id) {
+        let child_node = base_doc.node_from_id(child_id);
+
+        // Get child's computed styles
+        if let Some(child_styles) = child_node.primary_styles() {
+            // Check if child has display: grid (must be grid container to be subgrid)
+            let child_display = child_styles.clone_display();
+            if child_display.inside() == DisplayInside::Grid {
+                // Check if child uses subgrid on either axis
+                // Note: detect_subgrid_from_stylo is re-exported from grid_context module
+                let has_subgrid_rows = super::grid_context::detect_subgrid_from_stylo(
+                    &child_styles,
+                    super::grid_context::GridAxis::Row
+                );
+                let has_subgrid_columns = super::grid_context::detect_subgrid_from_stylo(
+                    &child_styles,
+                    super::grid_context::GridAxis::Column
+                );
+
+                // Collect children that are subgrids on at least one axis
+                if has_subgrid_rows || has_subgrid_columns {
+                    child_subgrids.push(child_id);
+                }
+            }
+        }
+    }
+
+    Ok(child_subgrids)
 }
 
 /// Legacy wrapper function for compatibility

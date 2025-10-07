@@ -227,7 +227,6 @@ struct ThreadCtx {
     net_provider: Arc<WptNetProvider<Resource>>,
     navigation_provider: Arc<dyn NavigationProvider>,
     renderer: VelloImageRenderer,
-    font_ctx: FontContext,
     buffers: Buffers,
 
     // Things that aren't really thread-specifc, but are convenient to store here
@@ -401,8 +400,6 @@ fn main() {
 
     let num = AtomicU32::new(0);
 
-    let base_font_context = cosmyc_text::FontSystem::new();
-
     let thread_state: ThreadLocal<RefCell<ThreadCtx>> = ThreadLocal::new();
 
     let mut results: Vec<TestResult> = test_paths
@@ -411,7 +408,6 @@ fn main() {
             let mut ctx = thread_state
                 .get_or(|| {
                     let renderer = VelloImageRenderer::new(WIDTH, HEIGHT);
-                    let font_ctx = base_font_context.clone();
                     let test_buffer = Vec::with_capacity((WIDTH * HEIGHT * 4) as usize);
                     let ref_buffer = Vec::with_capacity((WIDTH * HEIGHT * 4) as usize);
                     let viewport = Viewport::new(
@@ -445,7 +441,6 @@ fn main() {
                         viewport,
                         net_provider,
                         renderer,
-                        font_ctx,
                         buffers: Buffers {
                             test_buffer,
                             ref_buffer,

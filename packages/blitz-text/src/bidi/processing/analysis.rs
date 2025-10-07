@@ -21,31 +21,56 @@ impl BidiAnalyzer {
     pub fn create_visual_runs(
         &self,
         text: &str,
-        _bidi_info: &BidiInfo,
-        _paragraph: &unicode_bidi::ParagraphInfo,
+        bidi_info: &BidiInfo,
+        paragraph: &unicode_bidi::ParagraphInfo,
     ) -> Result<Vec<VisualRun>, BidiError> {
         let mut visual_runs = Vec::new();
-        let _line = 0..text.len();
+        let line_range = paragraph.range.clone();
 
-        // Simplified approach - create a single visual run for the entire text
-        // TODO: Implement proper reorder_line integration when API is clarified
-        let direction = Direction::LeftToRight; // Default direction
-        let range = 0..text.len();
-        let run_text = &text[range.clone()];
+        // Use unicode-bidi's visual_runs API to get proper reordering
+        let (levels, level_runs) = bidi_info.visual_runs(paragraph, line_range.clone());
 
-        // Analyze script and complexity
-        let (script, complexity) = self.analyze_run_script(run_text);
+        // Convert unicode-bidi LevelRuns to our VisualRun type
+        for (visual_index, level_run) in level_runs.iter().enumerate() {
+            // level_run is a Range<usize> representing byte indices
+            let byte_start = level_run.start;
+            let byte_end = level_run.end;
 
-        visual_runs.push(VisualRun {
-            text: run_text.to_string(),
-            start_index: range.start,
-            end_index: range.end,
-            direction,
-            level: 0, // Default level
-            script: SerializableScript::from_script(script),
-            complexity,
-            visual_order: 0, // Single run
-        });
+            // Get text for this run
+            let run_text = &text[byte_start..byte_end];
+
+            // Convert byte indices to character indices
+            let char_start = text[..byte_start].chars().count();
+            let char_end = char_start + run_text.chars().count();
+
+            // Get level for this run
+            let level_value = if byte_start < levels.len() {
+                levels[byte_start].number()
+            } else {
+                0
+            };
+
+            // Determine direction from level (odd = RTL, even = LTR)
+            let direction = if level_value % 2 == 1 {
+                Direction::RightToLeft
+            } else {
+                Direction::LeftToRight
+            };
+
+            // Analyze script and complexity
+            let (script, complexity) = self.analyze_run_script(run_text);
+
+            visual_runs.push(VisualRun {
+                text: run_text.to_string(),
+                start_index: char_start,
+                end_index: char_end,
+                direction,
+                level: level_value,
+                script: SerializableScript::from_script(script),
+                complexity,
+                visual_order: visual_index,
+            });
+        }
 
         Ok(visual_runs)
     }
@@ -138,19 +163,25 @@ impl BidiAnalyzer {
     pub fn create_index_mappings(
         &self,
         text: &str,
-        _bidi_info: &BidiInfo,
-        _paragraph: &unicode_bidi::ParagraphInfo,
+        bidi_info: &BidiInfo,
+        paragraph: &unicode_bidi::ParagraphInfo,
     ) -> Result<(Vec<usize>, Vec<usize>), BidiError> {
-        let text_len = text.chars().count();
-        let mut logical_to_visual = vec![0; text_len];
-        let mut visual_to_logical = vec![0; text_len];
+        let line_range = paragraph.range.clone();
 
-        // Simplified approach - create identity mapping for now
-        // TODO: Implement proper reorder_line integration when API is clarified
-        for i in 0..text_len {
-            if i < logical_to_visual.len() && i < visual_to_logical.len() {
-                logical_to_visual[i] = i;
-                visual_to_logical[i] = i;
+        // Get reordered levels using unicode-bidi API
+        let reordered_levels = bidi_info.reordered_levels(paragraph, line_range.clone());
+
+        // Use unicode-bidi's reorder_visual to create the index mapping
+        // This returns Vec<usize> where indexMap[visualIndex] == logicalIndex
+        let visual_to_logical = BidiInfo::reorder_visual(&reordered_levels);
+
+        // Create inverse mapping (logical to visual)
+        let char_count = text.chars().count();
+        let mut logical_to_visual = vec![0; char_count];
+
+        for (visual_idx, &logical_idx) in visual_to_logical.iter().enumerate() {
+            if logical_idx < logical_to_visual.len() {
+                logical_to_visual[logical_idx] = visual_idx;
             }
         }
 

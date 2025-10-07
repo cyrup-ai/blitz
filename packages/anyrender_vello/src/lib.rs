@@ -66,12 +66,15 @@ impl GlyphonState {
         // Create text atlas for GPU glyph caching - 4096x4096 texture
         let mut text_atlas = glyphon::TextAtlas::new(device, queue, &cache, format);
 
-        // Create text renderer with multisample and depth stencil configuration
+        // Create text renderer for 2D text overlay rendering
+        // - MultisampleState::default() (count: 1): Glyphon handles its own antialiasing
+        // - None for depth_stencil: 2D text doesn't need depth testing; rendered in painter's order
+        //   (would only need Some(DepthStencilState) for 3D text or stencil effects)
         let text_renderer = glyphon::TextRenderer::new(
             &mut text_atlas,
             device,
             wgpu::MultisampleState::default(),
-            None, // No depth stencil for now
+            None, // No depth stencil - not needed for 2D text overlays
         );
 
         // Create viewport with proper constructor

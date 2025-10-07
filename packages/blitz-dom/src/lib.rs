@@ -75,6 +75,7 @@ pub type SelectorList = selectors::SelectorList<style::selector_parser::Selector
 pub use events::{EventDriver, EventHandler, NoopEventHandler};
 pub use navigation::BlitzNavigationProvider;
 pub use text_system_singleton::{TextSystemSingleton, TextSystemSingletonError};
+pub use selectors::matching::QuirksMode;
 
 use std::sync::Arc;
 use blitz_traits::navigation::NavigationProvider;

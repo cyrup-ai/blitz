@@ -19,6 +19,8 @@ use dioxus_html::{
     },
 };
 use keyboard_types::{Code, Key, Location, Modifiers};
+use peniko::kurbo;
+use taffy::Point as TaffyPoint;
 
 #[derive(Clone, Debug)]
 pub struct NativeClickData {
@@ -79,26 +81,31 @@ impl NativeClickData {
     /// 
     /// This converts between the blitz coordinate system (f32) and dioxus coordinate system (f64),
     /// and between blitz mouse button types and dioxus mouse button types.
-    pub fn new(event: BlitzMouseButtonEvent) -> Self {
-        // Convert coordinates from f32 to f64
-        let x = event.x as f64;
-        let y = event.y as f64;
-        
-        // For now, treat the blitz coordinates as client coordinates (relative to viewport)
-        // In a complete implementation, these would be derived from window/element positions
-        let client_point = ClientPoint::new(x, y);
-        
-        // Screen coordinates would typically add window position offset
-        // For now, assume no window offset (fullscreen or positioned at 0,0)
-        let screen_point = ScreenPoint::new(x, y);
-        
-        // Page coordinates would add scroll offset
-        // For now, assume no scrolling
-        let page_point = PagePoint::new(x, y);
-        
-        // Element coordinates would subtract element position
-        // For now, assume click is at element origin
-        let element_point = ElementPoint::new(0.0, 0.0);
+    pub fn new(
+        event: BlitzMouseButtonEvent,
+        viewport_scroll: kurbo::Point,
+        target_location: TaffyPoint<f32>,
+    ) -> Self {
+        // Extract event coordinates (these are PAGE coordinates - document-relative)
+        let page_x = event.x as f64;
+        let page_y = event.y as f64;
+
+        // Page coordinates: Already correct (document-relative, includes scroll)
+        let page_point = PagePoint::new(page_x, page_y);
+
+        // Client coordinates: Subtract scroll offset to get viewport-relative coords
+        let client_x = page_x - viewport_scroll.x;
+        let client_y = page_y - viewport_scroll.y;
+        let client_point = ClientPoint::new(client_x, client_y);
+
+        // Screen coordinates: Add window position
+        // NOTE: Blitz has no window position tracking, so screen = client
+        let screen_point = ScreenPoint::new(client_x, client_y);
+
+        // Element coordinates: Subtract element's border-box position from client
+        let element_x = client_x - target_location.x as f64;
+        let element_y = client_y - target_location.y as f64;
+        let element_point = ElementPoint::new(element_x, element_y);
         
         // Convert button from blitz MouseEventButton to dioxus MouseButton
         let trigger_button = Self::convert_mouse_button(event.button);
@@ -337,12 +344,6 @@ pub struct NativeMediaData {
     pub muted: bool,
     #[allow(dead_code)] // Infrastructure for media play/pause state
     pub paused: bool,
-}
-
-#[derive(Clone, Debug, Default)]
-#[allow(dead_code)] // Infrastructure for component mount events
-pub struct NativeMountedData {
-    // Component mount data - placeholder for now
 }
 
 #[derive(Clone, Debug)]

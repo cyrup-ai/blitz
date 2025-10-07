@@ -59,8 +59,7 @@ fn convert_affine_to_peniko(affine: kurbo::Affine) -> peniko::kurbo::Affine {
 }
 
 fn convert_stroke_to_peniko(stroke: &kurbo::Stroke) -> peniko::kurbo::Stroke {
-    // Basic stroke with width and caps/joins - skip dashes for now to simplify
-    peniko::kurbo::Stroke::new(stroke.width)
+    let mut peniko_stroke = peniko::kurbo::Stroke::new(stroke.width)
         .with_caps(match stroke.start_cap {
             kurbo::Cap::Butt => peniko::kurbo::Cap::Butt,
             kurbo::Cap::Round => peniko::kurbo::Cap::Round,
@@ -71,7 +70,16 @@ fn convert_stroke_to_peniko(stroke: &kurbo::Stroke) -> peniko::kurbo::Stroke {
             kurbo::Join::Round => peniko::kurbo::Join::Round,
             kurbo::Join::Bevel => peniko::kurbo::Join::Bevel,
         })
-        .with_miter_limit(stroke.miter_limit)
+        .with_miter_limit(stroke.miter_limit);
+    
+    if !stroke.dash_pattern.is_empty() {
+        peniko_stroke = peniko_stroke.with_dashes(
+            stroke.dash_offset,
+            stroke.dash_pattern.iter().copied()
+        );
+    }
+    
+    peniko_stroke
 }
 
 fn convert_bezpath_to_peniko(path: &kurbo::BezPath) -> peniko::kurbo::BezPath {

@@ -167,10 +167,50 @@ impl EventHandler for DioxusEventHandler<'_> {
         event_state: &mut EventState,
     ) {
         let event_data = match &event.data {
-            DomEventData::MouseMove(mouse_event)
-            | DomEventData::MouseDown(mouse_event)
-            | DomEventData::MouseUp(mouse_event)
-            | DomEventData::Click(mouse_event) => Some(wrap_event_data(NativeClickData::new(mouse_event.clone()))),
+            DomEventData::MouseMove(mouse_event) => {
+                let viewport_scroll = mutr.doc.viewport_scroll();
+                let target_layout = mutr.doc.get_node(event.target)
+                    .map(|node| node.final_layout.location)
+                    .unwrap_or(taffy::Point::ZERO);
+                Some(wrap_event_data(NativeClickData::new(
+                    mouse_event.clone(),
+                    viewport_scroll,
+                    target_layout,
+                )))
+            }
+            DomEventData::MouseDown(mouse_event) => {
+                let viewport_scroll = mutr.doc.viewport_scroll();
+                let target_layout = mutr.doc.get_node(event.target)
+                    .map(|node| node.final_layout.location)
+                    .unwrap_or(taffy::Point::ZERO);
+                Some(wrap_event_data(NativeClickData::new(
+                    mouse_event.clone(),
+                    viewport_scroll,
+                    target_layout,
+                )))
+            }
+            DomEventData::MouseUp(mouse_event) => {
+                let viewport_scroll = mutr.doc.viewport_scroll();
+                let target_layout = mutr.doc.get_node(event.target)
+                    .map(|node| node.final_layout.location)
+                    .unwrap_or(taffy::Point::ZERO);
+                Some(wrap_event_data(NativeClickData::new(
+                    mouse_event.clone(),
+                    viewport_scroll,
+                    target_layout,
+                )))
+            }
+            DomEventData::Click(mouse_event) => {
+                let viewport_scroll = mutr.doc.viewport_scroll();
+                let target_layout = mutr.doc.get_node(event.target)
+                    .map(|node| node.final_layout.location)
+                    .unwrap_or(taffy::Point::ZERO);
+                Some(wrap_event_data(NativeClickData::new(
+                    mouse_event.clone(),
+                    viewport_scroll,
+                    target_layout,
+                )))
+            }
 
             DomEventData::KeyDown(kevent)
             | DomEventData::KeyUp(kevent)

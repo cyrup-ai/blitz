@@ -497,8 +497,8 @@ async fn run_memory_aware_capture(api: Arc<ScreenshotApiImpl>) -> Result<(), Box
             let filename = format!("memory_test_{:02}.png", frame_num);
             let _ = std::fs::write(&filename, data);
             
-            // Sample would go here in real implementation
-            // For now, just track frame numbers
+            // Note: Memory sampling is performed via API polling in the monitoring loop below,
+            // demonstrating async resource tracking pattern
         }
     };
     

@@ -211,9 +211,8 @@ mod style_cache_tests {
     // Helper functions for test setup
 
     fn create_test_document() -> BaseDocument {
-        // Create a minimal test document
-        // This would typically involve setting up a proper BaseDocument with stylist, etc.
-        // For now, we'll create a mock that has the essential components
+        // Test fixture: Creates a minimal document with essential components for cache testing.
+        // Production documents include full stylist initialization and are created via HTML parsing.
         BaseDocument::new(blitz_dom::DocumentConfig::default())
             .expect("Failed to create test document")
     }
@@ -234,8 +233,8 @@ mod style_cache_tests {
         
         let node_id = doc.create_node(node_data);
         
-        // Initialize basic stylo element data
-        // In a real scenario, this would be set up by the style system
+        // Note: Stylo element data initialization is handled by the style system in production.
+        // Tests use minimal setup to focus on cache behavior.
         node_id
     }
 

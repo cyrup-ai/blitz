@@ -1,14 +1,13 @@
 //! Enhanced measurement core using goldylox multi-tier caching
 
-use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Mutex;
 
 use cosmyc_text::fontdb;
 use goldylox::traits::CacheKey;
-use goldylox::{Goldylox, GoldyloxBuilder};
+use goldylox::Goldylox;
 use serde::{Deserialize, Serialize};
 
+use crate::measurement::cache::UnifiedCacheManager;
 use crate::measurement::types::*;
 
 // Statistics tracking (atomic counters for lock-free stats)
@@ -85,15 +84,10 @@ impl CacheKey for EnhancedMeasurementKey {
     }
 }
 
-/// Cache type for EnhancedMeasurementCore with fallback support
-enum CacheType {
-    Goldylox(Goldylox<String, TextMeasurement>),
-    HashMap(Mutex<HashMap<String, TextMeasurement>>),
-}
-
-/// Enhanced measurement system using goldylox with HashMap fallback
+/// Enhanced measurement system using goldylox (lock-free)
 pub struct EnhancedMeasurementCore {
-    cache_type: CacheType,
+    cache: Goldylox<String, TextMeasurement>,
+    unified_cache: UnifiedCacheManager,
 }
 
 impl EnhancedMeasurementCore {
@@ -105,19 +99,22 @@ impl EnhancedMeasurementCore {
 
 impl EnhancedMeasurementCore {
     pub fn new() -> Result<Self, Box<dyn std::error::Error>> {
-        // Use the global text measurement cache instead of creating a new one
-        let cache = crate::cache::get_text_measurement_cache();
+        // Get global Goldylox cache (singleton)
+        let cache = (*crate::cache::get_text_measurement_cache()).clone();
         
-        println!("✅ EnhancedMeasurementCore using global Goldylox cache (singleton)");
+        // Create unified cache manager for font metrics, bidi, features
+        let unified_cache = UnifiedCacheManager::new()
+            .map_err(|e| -> Box<dyn std::error::Error> {
+                Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
+            })?;
         
-        // Always use the global cache - no fallback needed since it's already initialized
-        let cache_type = CacheType::Goldylox((*cache).clone());
-
-        Ok(Self { cache_type })
+        println!("✅ EnhancedMeasurementCore using global Goldylox + UnifiedCacheManager");
+        
+        Ok(Self { cache, unified_cache })
     }
 
     pub fn measure_text(
-        &mut self,
+        &self,
         request: &MeasurementRequest,
     ) -> Result<TextMeasurement, MeasurementError> {
         let key = EnhancedMeasurementKey::new(
@@ -128,7 +125,7 @@ impl EnhancedMeasurementCore {
         );
         let string_key = Self::key_to_string(&key);
 
-        // Check cache based on cache type
+        // Check cache
         if let Some(cached) = self.get(&string_key) {
             CACHE_HITS.fetch_add(1, Ordering::Relaxed);
             return Ok(cached);
@@ -138,55 +135,29 @@ impl EnhancedMeasurementCore {
         CACHE_MISSES.fetch_add(1, Ordering::Relaxed);
         TOTAL_MEASUREMENTS.fetch_add(1, Ordering::Relaxed);
 
-        // Simplified measurement - real implementation would use proper text shaping
-        let measurement = TextMeasurement {
-            content_width: request.text.len() as f32 * request.font_size * 0.6,
-            content_height: request.font_size * 1.2,
-            line_height: request.font_size * 1.2,
-            baseline: request.font_size * 0.8,
-            ascent: request.font_size * 0.8,
-            descent: request.font_size * 0.2,
-            line_gap: 0.0,
-            x_height: request.font_size * 0.5,
-            cap_height: request.font_size * 0.7,
-            advance_width: request.text.len() as f32 * request.font_size * 0.6,
-            bounds: TextBounds::default(),
-            line_measurements: vec![],
-            total_character_count: request.text.len(),
-            baseline_offset: 0.0,
-            measured_at: std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_millis() as u64,
-        };
+        // Perform REAL measurement with proper cosmyc Buffer shaping
+        let measurement = crate::measurement::text_measurement::perform_measurement(
+            &request.text,
+            request.font_size,
+            request.max_width,
+            request.font_family.as_deref().unwrap_or("sans-serif"),
+            CSSBaseline::Alphabetic,
+            &self.unified_cache,
+        )?;
 
-        // Store in cache
+        // Store in Goldylox cache (lock-free put)
         self.put(string_key, measurement.clone());
 
         Ok(measurement)
     }
 
     fn get(&self, key: &str) -> Option<TextMeasurement> {
-        match &self.cache_type {
-            CacheType::Goldylox(cache) => cache.get(&key.to_string()),
-            CacheType::HashMap(cache) => {
-                cache.lock().ok()?.get(key).cloned()
-            }
-        }
+        self.cache.get(&key.to_string())
     }
 
     fn put(&self, key: String, value: TextMeasurement) {
-        match &self.cache_type {
-            CacheType::Goldylox(cache) => {
-                if let Err(e) = cache.put(key, value) {
-                    eprintln!("Warning: Failed to cache measurement in Goldylox: {}", e);
-                }
-            }
-            CacheType::HashMap(cache) => {
-                if let Ok(mut lock) = cache.lock() {
-                    lock.insert(key, value);
-                }
-            }
+        if let Err(e) = self.cache.put(key, value) {
+            eprintln!("Warning: Failed to cache measurement in Goldylox: {}", e);
         }
     }
 
@@ -211,18 +182,8 @@ impl EnhancedMeasurementCore {
         })
     }
 
-    pub fn clear_cache(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        match &self.cache_type {
-            CacheType::Goldylox(cache) => {
-                cache.clear().map_err(|e| Box::new(e) as Box<dyn std::error::Error>)
-            }
-            CacheType::HashMap(cache) => {
-                if let Ok(mut lock) = cache.lock() {
-                    lock.clear();
-                }
-                Ok(())
-            }
-        }
+    pub fn clear_cache(&self) -> Result<(), Box<dyn std::error::Error>> {
+        self.cache.clear().map_err(|e| Box::new(e) as Box<dyn std::error::Error>)
     }
 }
 
@@ -264,7 +225,7 @@ impl EnhancedTextMeasurer {
     }
 
     pub fn measure_text(
-        &mut self,
+        &self,
         request: &MeasurementRequest,
     ) -> Result<TextMeasurement, MeasurementError> {
         self.core.measure_text(request)
@@ -274,7 +235,7 @@ impl EnhancedTextMeasurer {
         self.core.get_font_metrics(font_id, size)
     }
 
-    pub fn clear_cache(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn clear_cache(&self) -> Result<(), Box<dyn std::error::Error>> {
         self.core.clear_cache()
     }
 

@@ -226,12 +226,14 @@ impl WindowRenderer for VelloWindowRenderer {
             if let Some(device_handle) = self.current_device_handle() {
                 let format = self.current_surface_format().unwrap_or(wgpu::TextureFormat::Bgra8UnormSrgb);
                 println!("🎯 INITIALIZING TEXT SYSTEM with GPU context");
+                // Initialize text system with GPU context for hardware-accelerated rendering
+                // Same parameters as TextRenderer::new() - see lib.rs for detailed explanation
                 match base_doc.initialize_text_system_with_gpu_context(
                     &device_handle.device,
                     &device_handle.queue,
                     format,
-                    wgpu::MultisampleState::default(),
-                    None,
+                    wgpu::MultisampleState::default(), // Single-sample, glyphon handles AA
+                    None, // No depth stencil for 2D text
                 ) {
                     Ok(()) => {
                         println!("✅ TEXT SYSTEM INITIALIZED SUCCESSFULLY");
@@ -293,7 +295,7 @@ impl WindowRenderer for VelloWindowRenderer {
         // Prepare collected text with glyphon BEFORE vello rendering
         if let Some(glyphon) = &mut self.glyphon_state {
             if !glyphon.pending_text_areas.is_empty() {
-                // Convert pending areas to glyphon TextAreas
+                // Convert pending text areas to glyphon format
                 let text_areas: Vec<glyphon::TextArea> = glyphon
                     .pending_text_areas
                     .iter()
@@ -304,7 +306,9 @@ impl WindowRenderer for VelloWindowRenderer {
                         scale: area.scale,
                         bounds: area.bounds,
                         default_color: area.color,
-                        custom_glyphs: &[], // No custom glyphs for now
+                        // Empty slice - custom glyphs are for icons/emoji/special graphics
+                        // Standard font-based text rendering doesn't require custom glyphs
+                        custom_glyphs: &[],
                     })
                     .collect();
 

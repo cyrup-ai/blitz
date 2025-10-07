@@ -188,13 +188,18 @@ impl TextWrapper {
 
     /// Check if two shaped runs can be merged
     pub fn can_merge_runs(first: &ShapedRun, second: &ShapedRun) -> bool {
-        // Runs can be merged if:
-        // 1. They are adjacent (first.end_index == second.start_index)
-        // 2. They have compatible properties (same font, size, etc.)
+        // Runs must be adjacent
+        if first.end_index != second.start_index {
+            return false;
+        }
 
-        first.end_index == second.start_index
-        // Add more compatibility checks as needed based on ShapedRun structure
-        // For now, assume all adjacent runs can be merged
+        // Runs must have matching properties for safe merging
+        first.script == second.script
+            && first.direction == second.direction
+            && first.level == second.level
+            && first.language == second.language
+        // Font properties are already compatible if runs were shaped together
+        // No need to check glyph-level attributes for merging decision
     }
 }
 

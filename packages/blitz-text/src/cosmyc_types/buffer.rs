@@ -10,6 +10,10 @@ use cosmyc_text::{
 };
 use unicode_segmentation::UnicodeSegmentation;
 
+use crate::line_breaking::{
+    character_classification::{classify_characters_simd, populate_ascii_properties},
+    types::LineBreakClass,
+};
 use super::glyph::GlyphInfo;
 
 /// RAII guard that ensures buffer state is restored even if panics occur
@@ -288,14 +292,51 @@ impl EnhancedBuffer {
                 }
             }
         } else {
-            // Unicode path: handle complex line break rules if needed
-            // For now, use same logic but could be enhanced for complex scripts
-            for line_segment in text.split('\n') {
-                if !line_segment.trim().is_empty() {
-                    let line_width = guard.with_buffer_and_font_system(|buffer, font_system| {
-                        buffer.measure_text_sequence(font_system, line_segment)
-                    });
-                    max_line_width = max_line_width.max(line_width);
+            // Unicode path: Use UAX #14 Unicode Line Breaking Algorithm for mandatory breaks
+            let chars: Vec<char> = text.chars().collect();
+
+            // Build ASCII fast-path lookup table
+            let mut break_property_cache = [LineBreakClass::XX; 256];
+            populate_ascii_properties(&mut break_property_cache);
+
+            // Classify all characters using UAX #14 with SIMD optimization
+            if let Ok(char_classes) = classify_characters_simd(&chars, &break_property_cache) {
+                let mut segment_start = 0;
+
+                // Find mandatory break positions
+                for (i, &class) in char_classes.iter().enumerate() {
+                    let is_mandatory_break = match class {
+                        // UAX #14 mandatory break classes
+                        LineBreakClass::BK | LineBreakClass::LF | LineBreakClass::NL => true,
+                        // CR is mandatory unless followed by LF (handle CR+LF as single break)
+                        LineBreakClass::CR => {
+                            i + 1 >= char_classes.len() || char_classes[i + 1] != LineBreakClass::LF
+                        }
+                        _ => false,
+                    };
+
+                    if is_mandatory_break {
+                        // Extract segment using character indices (not byte indices!)
+                        let segment: String = chars[segment_start..=i].iter().collect();
+                        if !segment.trim().is_empty() {
+                            let line_width = guard.with_buffer_and_font_system(|buffer, font_system| {
+                                buffer.measure_text_sequence(font_system, &segment)
+                            });
+                            max_line_width = max_line_width.max(line_width);
+                        }
+                        segment_start = i + 1;
+                    }
+                }
+
+                // Handle final segment (text after last mandatory break)
+                if segment_start < chars.len() {
+                    let segment: String = chars[segment_start..].iter().collect();
+                    if !segment.trim().is_empty() {
+                        let line_width = guard.with_buffer_and_font_system(|buffer, font_system| {
+                            buffer.measure_text_sequence(font_system, &segment)
+                        });
+                        max_line_width = max_line_width.max(line_width);
+                    }
                 }
             }
         }

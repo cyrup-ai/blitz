@@ -864,9 +864,9 @@ pub(crate) fn shape_text_advanced(
         let mut shaper = shaper.borrow_mut();
         match shaper.as_mut() {
             Some(shaper) => {
-                shaper.shape_text(text, attrs, max_width).or_else(|e| {
+                shaper.shape_text(text, attrs, max_width).or_else(|_e| {
                     #[cfg(feature = "tracing")]
-                    tracing::warn!("Text shaping failed: {:?}, attempting graceful fallback", e);
+                    tracing::warn!("Text shaping failed: {:?}, attempting graceful fallback", _e);
 
                     // Attempt fallback with simplified attributes
                     let fallback_attrs = Attrs::new().family(blitz_text::Family::SansSerif);

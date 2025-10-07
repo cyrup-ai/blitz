@@ -107,7 +107,6 @@ fn parse_and_resolve_document(
         html,
         DocumentConfig {
             base_url: Some(ctx.dummy_base_url.join(relative_path).unwrap().to_string()),
-            font_ctx: Some(ctx.font_ctx.clone()),
             net_provider: Some(Arc::clone(&ctx.net_provider) as _),
             navigation_provider: Some(Arc::clone(&ctx.navigation_provider)),
             ..Default::default()

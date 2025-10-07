@@ -15,7 +15,7 @@ blitz-html = { version = "0.1.0-alpha.5", path = "../../packages/blitz-html", de
 blitz-traits = { version = "0.1.0-alpha.5", path = "../../packages/blitz-traits", default-features = false }
 anyrender = { version = "0.4.1", path = "../../packages/anyrender" }
 taffy = "0.9.0"
-cosmyc-text = { path = "../../cosmyc-text" }
+cosmyc-text = { path = "../../tmp/cosmyc-text" }
 url = "2.5.4"
 data-url = "0.3.1"
 owo-colors = "4.2.2"
@@ -72,3 +72,8 @@ version = "0.11.8"
 [dependencies.wptreport]
 version = "0.0.10"
 default-features = false
+
+[workspace]
+
+[patch."https://github.com/cyrup-ai/blitz"]
+blitz-text = { path = "../../packages/blitz-text" }

@@ -2,6 +2,7 @@
 
 use std::borrow::Cow;
 use std::cell::{Cell, Ref, RefCell, RefMut};
+use std::rc::Rc;
 
 use blitz_dom::node::Attribute;
 use blitz_dom::{BaseDocument, DocumentMutator};
@@ -50,10 +51,10 @@ pub struct DocumentHtmlParser<'doc> {
     /// Errors that occurred during parsing.
     pub errors: RefCell<Vec<Cow<'static, str>>>,
 
-    /// The document's quirks mode.
-    pub quirks_mode: Cell<QuirksMode>,
+    /// The document's quirks mode (shared cell persists after parser is consumed).
+    pub quirks_mode: Rc<Cell<QuirksMode>>,
     pub is_xml: bool,
-    
+
     /// Cache for converted QualNames in elem_name calls
     elem_name_cache: RefCell<Option<html5ever::QualName>>,
 }
@@ -71,14 +72,17 @@ impl DocumentHtmlParser<'_> {
         DocumentHtmlParser {
             document_mutator: RefCell::new(doc.mutate()),
             errors: RefCell::new(Vec::new()),
-            quirks_mode: Cell::new(QuirksMode::NoQuirks),
+            quirks_mode: Rc::new(Cell::new(QuirksMode::NoQuirks)),
             is_xml: false,
             elem_name_cache: RefCell::new(None),
         }
     }
 
     pub fn parse_into_doc<'d>(doc: &'d mut BaseDocument, html: &str) -> &'d mut BaseDocument {
-        let mut sink = Self::new(doc);
+        let sink = Self::new(doc);
+
+        // Clone Rc to quirks_mode so we can access it after the sink is consumed
+        let quirks_mode_cell = sink.quirks_mode.clone();
 
         let is_xhtml_doc = html.starts_with("<?xml")
             || html.starts_with("<!DOCTYPE") && {
@@ -88,14 +92,16 @@ impl DocumentHtmlParser<'_> {
 
         if is_xhtml_doc {
             // Parse as XHTML
-            sink.is_xml = true;
-            html5ever::parse_document(sink, Default::default())
+            let mut xhtml_sink = sink;
+            xhtml_sink.is_xml = true;
+            html5ever::parse_document(xhtml_sink, Default::default())
                 .from_utf8()
                 .read_from(&mut html.as_bytes())
                 .unwrap();
         } else {
             // Parse as HTML
-            sink.is_xml = false;
+            let mut html_sink = sink;
+            html_sink.is_xml = false;
             let opts = ParseOpts {
                 tokenizer: TokenizerOpts::default(),
                 tree_builder: TreeBuilderOpts {
@@ -106,11 +112,22 @@ impl DocumentHtmlParser<'_> {
                     quirks_mode: QuirksMode::NoQuirks,
                 },
             };
-            html5ever::parse_document(sink, opts)
+            html5ever::parse_document(html_sink, opts)
                 .from_utf8()
                 .read_from(&mut html.as_bytes())
                 .unwrap();
         }
+
+        let detected_quirks_mode = quirks_mode_cell.get();
+
+        // Transfer detected quirks mode from HTML parser to document
+        // Convert html5ever's QuirksMode to blitz_dom's QuirksMode (from selectors)
+        let blitz_quirks_mode = match detected_quirks_mode {
+            QuirksMode::NoQuirks => blitz_dom::QuirksMode::NoQuirks,
+            QuirksMode::LimitedQuirks => blitz_dom::QuirksMode::LimitedQuirks,
+            QuirksMode::Quirks => blitz_dom::QuirksMode::Quirks,
+        };
+        doc.set_quirks_mode(blitz_quirks_mode);
 
         doc
     }
@@ -239,7 +256,9 @@ impl<'b> TreeSink for DocumentHtmlParser<'b> {
         _public_id: StrTendril,
         _system_id: StrTendril,
     ) {
-        // Ignore. We don't care about the DOCTYPE for now.
+        // DOCTYPE nodes are not stored in the DOM tree.
+        // Quirks mode is detected by html5ever and propagated via set_quirks_mode() callback.
+        // After parsing completes, parse_into_doc() transfers the quirks mode to BaseDocument.
     }
 
     fn get_template_contents(&self, target: &Self::Handle) -> Self::Handle {

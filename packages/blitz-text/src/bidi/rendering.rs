@@ -142,12 +142,23 @@ pub trait BidiRenderTarget {
 /// BiDi rendering engine
 pub struct BidiRenderer {
     default_direction: Direction,
+    // Statistics tracking (using Cell for interior mutability)
+    glyphs_rendered: std::cell::Cell<usize>,
+    total_width: std::cell::Cell<f32>,
+    total_height: std::cell::Cell<f32>,
+    lines_rendered: std::cell::Cell<usize>,
 }
 
 impl BidiRenderer {
     /// Create new BiDi renderer
     pub fn new(default_direction: Direction) -> Self {
-        Self { default_direction }
+        Self {
+            default_direction,
+            glyphs_rendered: std::cell::Cell::new(0),
+            total_width: std::cell::Cell::new(0.0),
+            total_height: std::cell::Cell::new(0.0),
+            lines_rendered: std::cell::Cell::new(0),
+        }
     }
 
     /// Set default text direction
@@ -178,6 +189,7 @@ impl BidiRenderer {
         target.begin_line(line_index, y_offset)?;
 
         let mut current_x = 0.0;
+        let mut line_width = 0.0;
 
         // Render visual runs in visual order
         for visual_run in &processed_bidi.visual_runs {
@@ -185,6 +197,13 @@ impl BidiRenderer {
             if let Some(shaped_run) = self.find_shaped_run_for_visual(visual_run, shaped_runs) {
                 // Extract glyphs for this visual run
                 let run_glyphs = self.extract_glyphs_for_run(visual_run, shaped_run)?;
+
+                // Track glyph count
+                self.glyphs_rendered
+                    .set(self.glyphs_rendered.get() + run_glyphs.len());
+
+                // Calculate run width
+                let run_width = self.calculate_run_width(&run_glyphs);
 
                 // Render the glyph run
                 target.render_glyph_run(
@@ -196,9 +215,18 @@ impl BidiRenderer {
                 )?;
 
                 // Advance x position
-                current_x += self.calculate_run_width(&run_glyphs);
+                current_x += run_width;
+                line_width += run_width;
             }
         }
+
+        // Track line width and increment lines rendered
+        self.total_width.set(self.total_width.get().max(line_width));
+        self.lines_rendered.set(self.lines_rendered.get() + 1);
+
+        // Calculate and track height from shaped runs
+        let line_metrics = self.calculate_line_metrics(shaped_runs, 0.0);
+        self.total_height.set(self.total_height.get().max(y_offset + line_metrics.line_height));
 
         target.end_line(line_index)?;
         Ok(())
@@ -211,6 +239,8 @@ impl BidiRenderer {
         lines: &[(ProcessedBidi, Vec<ShapedRun>)],
         line_height: f32,
     ) -> Result<(), BidiError> {
+        let mut max_height = 0.0;
+
         for (line_index, (processed_bidi, shaped_runs)) in lines.iter().enumerate() {
             let y_offset = line_index as f32 * line_height;
             self.render_bidi_text_with_line_index(
@@ -220,7 +250,13 @@ impl BidiRenderer {
                 line_index,
                 y_offset,
             )?;
+
+            max_height = y_offset + line_height;
         }
+
+        // Track total height for multiline rendering
+        self.total_height.set(max_height);
+
         Ok(())
     }
 
@@ -244,6 +280,10 @@ impl BidiRenderer {
             if let Some(shaped_run) = self.find_shaped_run_for_visual(visual_run, shaped_runs) {
                 let run_glyphs = self.extract_glyphs_for_run(visual_run, shaped_run)?;
 
+                // Track glyph count
+                self.glyphs_rendered
+                    .set(self.glyphs_rendered.get() + run_glyphs.len());
+
                 // Calculate run width
                 let run_width = self.calculate_run_width(&run_glyphs);
 
@@ -260,6 +300,11 @@ impl BidiRenderer {
                 line_width += run_width;
             }
         }
+
+        // Track line width and increment lines rendered
+        self.total_width.set(self.total_width.get().max(line_width));
+        self.lines_rendered.set(self.lines_rendered.get() + 1);
+        self.total_height.set(self.total_height.get().max(y_offset + line_metrics.line_height));
 
         target.end_line(line_index)?;
         Ok(line_width)
@@ -383,17 +428,31 @@ impl BidiRenderer {
             }
         }
 
+        // Track total height
+        self.total_height.set(total_height);
+
         Ok(total_height)
     }
 
     /// Get rendering statistics
     pub fn get_rendering_stats(&self) -> RenderingStats {
         RenderingStats {
-            lines_rendered: 0, // Would be tracked in a real implementation
-            glyphs_rendered: 0,
-            total_width: 0.0,
-            total_height: 0.0,
+            lines_rendered: self.lines_rendered.get(),
+            glyphs_rendered: self.glyphs_rendered.get(),
+            total_width: self.total_width.get(),
+            total_height: self.total_height.get(),
         }
+    }
+
+    /// Reset rendering statistics
+    ///
+    /// Clears all accumulated statistics. Should be called between frames
+    /// or when starting a new rendering session to get accurate per-frame metrics.
+    pub fn reset_stats(&self) {
+        self.glyphs_rendered.set(0);
+        self.total_width.set(0.0);
+        self.total_height.set(0.0);
+        self.lines_rendered.set(0);
     }
 }
 

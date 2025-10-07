@@ -1,4 +1,5 @@
 use std::any::Any;
+use std::cell::Cell;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ops::{Deref, DerefMut};
 use std::str::FromStr;
@@ -247,6 +248,8 @@ pub struct BaseDocument {
     pub(crate) guard: SharedRwLock,
     /// Stylo invalidation map. We insert into this map prior to mutating nodes.
     pub(crate) snapshots: SnapshotMap,
+    /// Document's quirks mode (determined by DOCTYPE)
+    pub(crate) quirks_mode: Cell<QuirksMode>,
 
 
 
@@ -283,7 +286,7 @@ pub struct BaseDocument {
     pub shell_provider: Arc<dyn ShellProvider>,
 }
 
-pub(crate) fn make_device(viewport: &Viewport) -> Device {
+pub(crate) fn make_device(viewport: &Viewport, quirks_mode: QuirksMode) -> Device {
     let width = viewport.window_size.0 as f32 / viewport.scale();
     let height = viewport.window_size.1 as f32 / viewport.scale();
     let viewport_size = euclid::Size2D::new(width, height);
@@ -291,7 +294,7 @@ pub(crate) fn make_device(viewport: &Viewport) -> Device {
 
     Device::new(
         MediaType::screen(),
-        selectors::matching::QuirksMode::NoQuirks,
+        quirks_mode,
         viewport_size,
         device_pixel_ratio,
         Box::new(BlitzFontMetricsProvider::default()),
@@ -310,9 +313,10 @@ impl BaseDocument {
 
         let id = ID_GENERATOR.fetch_add(1, Ordering::SeqCst);
         let viewport = config.viewport.unwrap_or_default();
-        let device = make_device(&viewport);
+        let device = make_device(&viewport, QuirksMode::NoQuirks);
         let stylist = Stylist::new(device, QuirksMode::NoQuirks);
         let snapshots = SnapshotMap::new();
+        let quirks_mode = Cell::new(QuirksMode::NoQuirks);
         let nodes = Box::new(Slab::new());
         let guard = SharedRwLock::new();
         let nodes_to_id = HashMap::new();
@@ -347,6 +351,7 @@ impl BaseDocument {
             nodes,
             stylist,
             snapshots,
+            quirks_mode,
             nodes_to_id,
             viewport,
             devtool_settings: DevtoolSettings::default(),
@@ -437,6 +442,33 @@ impl BaseDocument {
 
     pub fn tree(&self) -> &Slab<Node> {
         &self.nodes
+    }
+
+    /// Set the document's quirks mode and update Stylist and Device accordingly.
+    /// This should be called after DOCTYPE parsing to apply the correct rendering mode.
+    pub fn set_quirks_mode(&mut self, mode: QuirksMode) {
+        let current_mode = self.quirks_mode.get();
+        if current_mode == mode {
+            return; // No change needed
+        }
+
+        self.quirks_mode.set(mode);
+
+        // Update Stylist's quirks mode (invalidates stylesheets if needed)
+        self.stylist.set_quirks_mode(mode);
+
+        // Recreate Device with correct quirks mode
+        let new_device = make_device(&self.viewport, mode);
+        let guards = StylesheetGuards {
+            author: &self.guard.read(),
+            ua_or_user: &self.guard.read(),
+        };
+        self.stylist.set_device(new_device, &guards);
+    }
+
+    /// Get the document's current quirks mode
+    pub fn quirks_mode(&self) -> QuirksMode {
+        self.quirks_mode.get()
     }
 
     pub fn id(&self) -> usize {
@@ -648,10 +680,11 @@ impl BaseDocument {
     pub fn create_node(&mut self, node_data: NodeData) -> usize {
         let slab_ptr = self.nodes.as_mut() as *mut Slab<Node>;
         let guard = self.guard.clone();
+        let quirks_mode = self.quirks_mode.get();
 
         let entry = self.nodes.vacant_entry();
         let id = entry.key();
-        entry.insert(Node::new(slab_ptr, id, guard, node_data));
+        entry.insert(Node::new(slab_ptr, id, guard, quirks_mode, node_data));
 
         // Mark the new node as changed.
         self.changed_nodes.insert(id);
@@ -761,7 +794,7 @@ impl BaseDocument {
             self.guard.clone(),
             Some(&StylesheetLoader(self.id, self.net_provider.clone())),
             None,
-            QuirksMode::NoQuirks,
+            self.quirks_mode.get(),
             AllowImportRules::Yes,
         );
 
@@ -1280,7 +1313,7 @@ impl BaseDocument {
 
     pub fn set_viewport(&mut self, viewport: Viewport) {
         self.viewport = viewport;
-        self.set_stylist_device(make_device(&self.viewport));
+        self.set_stylist_device(make_device(&self.viewport, self.quirks_mode.get()));
         self.scroll_viewport_by(0.0, 0.0); // Clamp scroll offset
     }
 

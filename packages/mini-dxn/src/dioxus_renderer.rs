@@ -98,7 +98,16 @@ impl WindowRenderer for DxnWindowRenderer {
     }
 
     fn initialize_text_system(&self, doc: &dyn std::any::Any) -> Result<(), String> {
-        self.inner.borrow().initialize_text_system(doc)
+        // Try DioxusDocument first, then fall back to BaseDocument
+        if let Some(dioxus_doc) = doc.downcast_ref::<crate::DioxusDocument>() {
+            // Access inner BaseDocument through deref
+            self.inner.borrow().initialize_text_system(&**dioxus_doc as &dyn std::any::Any)
+        } else if let Some(_base_doc) = doc.downcast_ref::<blitz_dom::BaseDocument>() {
+            // Direct BaseDocument (shouldn't happen but handle it)
+            self.inner.borrow().initialize_text_system(doc)
+        } else {
+            Err("Document is neither DioxusDocument nor BaseDocument".to_string())
+        }
     }
 
     fn render<F: FnOnce(&mut Self::ScenePainter<'_>)>(&mut self, draw_fn: F) {

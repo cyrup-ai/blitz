@@ -35,6 +35,10 @@ blitz-net = { path = "../blitz-net", optional = true }
 blitz-traits = { path = "../blitz-traits" }
 blitz-shell = { path = "../blitz-shell" }
 
+# Layout and graphics primitives
+taffy = "0.9.1"
+peniko = "0.4"
+
 # DioxusLabs dependencies - MUST USE OUR FORK
 dioxus-core = { git = "https://github.com/cyrup-ai/dioxus", branch = "main", package = "dioxus-core" }
 dioxus-html = { git = "https://github.com/cyrup-ai/dioxus", branch = "main", package = "dioxus-html" }

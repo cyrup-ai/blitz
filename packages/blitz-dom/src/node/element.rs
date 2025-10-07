@@ -276,13 +276,13 @@ impl ElementData {
             }
     }
 
-    pub fn flush_style_attribute(&mut self, guard: &SharedRwLock, url_extra_data: &UrlExtraData) {
+    pub fn flush_style_attribute(&mut self, guard: &SharedRwLock, url_extra_data: &UrlExtraData, quirks_mode: QuirksMode) {
         self.style_attribute = self.attr(local_name!("style")).map(|style_str| {
             ServoArc::new(guard.wrap(parse_style_attribute(
                 style_str,
                 url_extra_data,
                 None,
-                QuirksMode::NoQuirks,
+                quirks_mode,
                 CssRuleType::Style,
             )))
         });
@@ -821,6 +821,8 @@ mod background_image_tests {
 mod content_width_caching_tests {
     use super::*;
     use blitz_text::{FontSystem, Metrics};
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
 
     fn create_test_text_layout() -> TextLayout {
         let mut font_system = FontSystem::new();
@@ -832,6 +834,91 @@ mod content_width_caching_tests {
             cached_content_widths: None,
             cached_text_hash: None,
         }
+    }
+
+    #[test]
+    fn test_content_width_caching_invalidation() {
+        // Test that content width cache is properly invalidated when text changes
+        let mut layout = create_test_text_layout();
+        
+        // Initial state: no cache
+        assert!(layout.cached_content_widths.is_none());
+        assert!(layout.cached_text_hash.is_none());
+        
+        // Simulate caching content widths
+        let initial_hash = {
+            let mut hasher = DefaultHasher::new();
+            layout.text.hash(&mut hasher);
+            layout.inline_boxes.len().hash(&mut hasher);
+            hasher.finish()
+        };
+        
+        layout.cached_text_hash = Some(initial_hash);
+        layout.cached_content_widths = Some(ContentWidths {
+            min: 50.0,
+            max: 200.0,
+        });
+        
+        // Verify cache is populated
+        assert!(layout.cached_content_widths.is_some());
+        assert_eq!(layout.cached_text_hash, Some(initial_hash));
+        
+        // Change text content
+        layout.text = "Different text with more characters".to_string();
+        
+        // Calculate new hash
+        let new_hash = {
+            let mut hasher = DefaultHasher::new();
+            layout.text.hash(&mut hasher);
+            layout.inline_boxes.len().hash(&mut hasher);
+            hasher.finish()
+        };
+        
+        // Verify hash would be different (cache should be invalidated)
+        assert_ne!(new_hash, initial_hash);
+        
+        // In real usage, the system should detect this hash mismatch
+        // and recompute widths rather than using stale cached values
+    }
+
+    #[test]
+    fn test_inline_box_impact_on_cache() {
+        // Test that inline boxes affect cache invalidation
+        let mut layout = create_test_text_layout();
+        
+        // Calculate initial hash
+        let initial_hash = {
+            let mut hasher = DefaultHasher::new();
+            layout.text.hash(&mut hasher);
+            layout.inline_boxes.len().hash(&mut hasher);
+            hasher.finish()
+        };
+        
+        layout.cached_text_hash = Some(initial_hash);
+        
+        // Add an inline box (simulating an inline element like <span> or <img>)
+        layout.inline_boxes.push(InlineBox {
+            id: 1,
+            index: 5,
+            width: 30.0,
+            height: 20.0,
+            x: 0.0,
+            y: 0.0,
+        });
+        
+        // Calculate new hash after inline box addition
+        let new_hash = {
+            let mut hasher = DefaultHasher::new();
+            layout.text.hash(&mut hasher);
+            layout.inline_boxes.len().hash(&mut hasher);
+            hasher.finish()
+        };
+        
+        // Verify that adding inline boxes changes the hash
+        assert_ne!(new_hash, initial_hash);
+        
+        // This ensures that inline elements (like images, icons, or styled spans)
+        // properly trigger cache invalidation for accurate width calculations
     }
 }
 

@@ -10,7 +10,7 @@ use keyboard_types::Modifiers;
 use markup5ever::{LocalName, local_name};
 // Cluster functionality has been replaced with cosmyc-text text hit testing
 use peniko::kurbo;
-use selectors::matching::ElementSelectorFlags;
+use selectors::matching::{ElementSelectorFlags, QuirksMode};
 use slab::Slab;
 use style::invalidation::element::restyle_hints::RestyleHint;
 use style::properties::ComputedValues;
@@ -101,6 +101,7 @@ pub struct Node {
     pub selector_flags: AtomicRefCell<ElementSelectorFlags>,
     pub guard: SharedRwLock,
     pub element_state: ElementState,
+    pub quirks_mode: QuirksMode,
 
     // Pseudo element nodes
     pub before: Option<usize>,
@@ -132,6 +133,7 @@ impl Node {
         tree: *mut Slab<Node>,
         id: usize,
         guard: SharedRwLock,
+        quirks_mode: QuirksMode,
         data: NodeData,
     ) -> Self {
         Self {
@@ -151,6 +153,7 @@ impl Node {
             selector_flags: AtomicRefCell::new(ElementSelectorFlags::empty()),
             guard,
             element_state: ElementState::empty(),
+            quirks_mode,
 
             before: None,
             after: None,
@@ -822,7 +825,7 @@ impl Node {
 
     pub fn flush_style_attribute(&mut self, url_extra_data: &UrlExtraData) {
         if let NodeData::Element(ref mut elem_data) = self.data {
-            elem_data.flush_style_attribute(&self.guard, url_extra_data);
+            elem_data.flush_style_attribute(&self.guard, url_extra_data, self.quirks_mode);
         }
     }
 

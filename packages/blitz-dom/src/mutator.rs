@@ -10,8 +10,9 @@ use style::invalidation::element::restyle_hints::RestyleHint;
 use style::stylesheets::OriginSet;
 
 use crate::document::make_device;
-use crate::net::CssHandler;
+use crate::net::{CssHandler, ImageHandler};
 use crate::node::{CanvasData, NodeFlags, SpecialElementData};
+use crate::util::ImageType;
 use crate::{Attribute, BaseDocument, ElementData, Node, NodeData, QualName, local_name, ns};
 
 macro_rules! tag_and_attr {
@@ -123,7 +124,7 @@ impl DocumentMutator<'_> {
 
     pub fn create_element(&mut self, name: QualName, attrs: Vec<Attribute>) -> usize {
         let mut data = ElementData::new(name, attrs);
-        data.flush_style_attribute(self.doc.guard(), &self.doc.url.url_extra_data());
+        data.flush_style_attribute(self.doc.guard(), &self.doc.url.url_extra_data(), self.doc.quirks_mode());
 
         let id = self.doc.create_node(NodeData::Element(data));
         let node = match self.doc.get_node(id) {
@@ -213,6 +214,9 @@ impl DocumentMutator<'_> {
     pub fn set_attribute(&mut self, node_id: usize, name: QualName, value: &str) {
         self.doc.snapshot_node(node_id);
 
+        // Get quirks_mode before mutable borrows to avoid borrow conflicts
+        let quirks_mode = self.doc.quirks_mode();
+
         let node = &mut self.doc.nodes[node_id];
         if let Some(data) = &mut *node.stylo_element_data.borrow_mut() {
             data.hint |= RestyleHint::restyle_subtree();
@@ -252,7 +256,7 @@ impl DocumentMutator<'_> {
         }
 
         if *attr == local_name!("style") {
-            element.flush_style_attribute(&self.doc.guard, &self.doc.url.url_extra_data());
+            element.flush_style_attribute(&self.doc.guard, &self.doc.url.url_extra_data(), quirks_mode);
         } else if (tag, attr) == tag_and_attr!("input", "checked") {
             set_input_checked_state(element, value.to_string());
         } else if (tag, attr) == tag_and_attr!("img", "src") {
@@ -303,6 +307,9 @@ impl DocumentMutator<'_> {
             });
         }
 
+        // Get quirks_mode before mutable borrows to avoid borrow conflicts
+        let quirks_mode = self.doc.quirks_mode();
+
         // Get a fresh element reference for the remaining operations
         let element = match self.doc.nodes[node_id].element_data_mut() {
             Some(element) => element,
@@ -312,7 +319,7 @@ impl DocumentMutator<'_> {
         let tag = &tag_local;
         let attr = &name.local;
         if *attr == local_name!("style") {
-            element.flush_style_attribute(&self.doc.guard, &self.doc.url.url_extra_data());
+            element.flush_style_attribute(&self.doc.guard, &self.doc.url.url_extra_data(), quirks_mode);
         } else if (tag, attr) == tag_and_attr!("canvas", "src") {
             self.recompute_is_animating = true;
         } else if (tag, attr) == tag_and_attr!("link", "href") {
@@ -637,6 +644,7 @@ impl<'doc> DocumentMutator<'doc> {
                 source_url: url,
                 guard: self.doc.guard.clone(),
                 provider: self.doc.net_provider.clone(),
+                quirks_mode: self.doc.quirks_mode(),
             }),
         );
     }
@@ -665,14 +673,11 @@ impl<'doc> DocumentMutator<'doc> {
             && !raw_src.is_empty()
         {
             let src = self.doc.resolve_url(raw_src);
-            // TODO: Implement proper image loading with the correct handler
-            // For now, we'll just store the URL in the node's data
-            if node.is_element() {
-                // Use a string literal for the attribute name
-                let attr_name = QualName::new(None, ns!(), LocalName::from("data-src"));
-                // Convert Url to string slice
-                self.set_attribute(target_id, attr_name, src.as_str());
-            }
+            self.doc.net_provider.fetch(
+                self.doc.id(),
+                Request::get(src),
+                Box::new(ImageHandler::new(target_id, ImageType::Image)),
+            );
         }
     }
 
@@ -776,7 +781,7 @@ impl DerefMut for ViewportMut<'_> {
 }
 impl Drop for ViewportMut<'_> {
     fn drop(&mut self) {
-        self.doc.set_stylist_device(make_device(&self.doc.viewport));
+        self.doc.set_stylist_device(make_device(&self.doc.viewport, self.doc.quirks_mode()));
         self.doc.scroll_viewport_by(0.0, 0.0); // Clamp scroll offset
     }
 }

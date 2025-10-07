@@ -107,9 +107,9 @@ pub fn launch_cfg(
     // Create the document and renderer
     let doc = DioxusDocument::new(vdom, net_provider);
     
-    // Initialize text system with GPU context
-    // Note: This will be called after the renderer is resumed and GPU context is available
-    // For now, we'll set up a callback to initialize it later
+    // Text system initialization happens automatically during Window::resume()
+    // The shell calls renderer.initialize_text_system(doc) after GPU context is available
+    // See: blitz-shell/src/window.rs:178-182 and WindowRenderer::initialize_text_system trait
     
     let window = WindowConfig::new(Box::new(doc) as _, renderer);
 

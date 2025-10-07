@@ -233,6 +233,10 @@ pub struct IntrinsicSizingState {
     pub cross_axis_deps: Vec<CrossAxisDependency>,
     /// Current coordination pass
     pub coordination_pass: usize,
+    /// Previous row track sizes for convergence checking
+    pub previous_row_sizes: Option<Vec<f32>>,
+    /// Previous column track sizes for convergence checking
+    pub previous_column_sizes: Option<Vec<f32>>,
 }
 
 /// Axis sizing state for intrinsic sizing

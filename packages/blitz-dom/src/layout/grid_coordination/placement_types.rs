@@ -106,6 +106,65 @@ impl Default for GridPosition {
     }
 }
 
+impl TrackOccupancyMap {
+    /// Check if a rectangular area is available for placement
+    pub fn is_area_available(&self, row_start: i32, row_end: i32, col_start: i32, col_end: i32) -> bool {
+        // Check if area is within grid bounds
+        if row_start < 0 || col_start < 0 {
+            return false;
+        }
+
+        // Check all cells in the rectangular area
+        for row in row_start..row_end {
+            for col in col_start..col_end {
+                if self.occupied_cells.contains_key(&(row, col)) {
+                    return false;
+                }
+            }
+        }
+        true
+    }
+
+    /// Mark area as occupied by an item
+    pub fn mark_area_occupied(&mut self, placement: &ItemPlacement) {
+        for row in placement.grid_area.row_start..placement.grid_area.row_end {
+            for col in placement.grid_area.column_start..placement.grid_area.column_end {
+                self.occupied_cells.insert((row, col), placement.node_id);
+            }
+        }
+    }
+
+    /// Find next available position for an item with given spans
+    pub fn find_next_available(&self, row_span: usize, col_span: usize, start_row: i32, start_col: i32) -> Option<GridPosition> {
+        // Search from start position for first area that fits the item
+        let max_row = self.grid_size.row;
+        let max_col = self.grid_size.column;
+
+        // Try each position starting from the given start position
+        for row in start_row..max_row {
+            let col_start = if row == start_row { start_col } else { 0 };
+
+            for col in col_start..max_col {
+                // Check if item fits at this position
+                let row_end = row + row_span as i32;
+                let col_end = col + col_span as i32;
+
+                // Check bounds
+                if row_end > max_row || col_end > max_col {
+                    continue;
+                }
+
+                // Check if area is available
+                if self.is_area_available(row, row_end, col, col_end) {
+                    return Some(GridPosition { row, column: col });
+                }
+            }
+        }
+
+        None // No space available
+    }
+}
+
 impl Default for TrackOccupancyMap {
     fn default() -> Self {
         Self {

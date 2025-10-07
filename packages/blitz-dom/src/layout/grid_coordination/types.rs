@@ -98,6 +98,16 @@ pub struct InheritedTrackDefinitions {
     pub column_sizing_functions: Vec<TrackSizingFunction>,
 }
 
+/// Replaced grid template properties ready for application
+#[derive(Debug, Clone)]
+pub struct ReplacedGridTemplates {
+    /// Row track sizing functions converted to Taffy format
+    pub row_functions: Vec<taffy::TrackSizingFunction>,
+    
+    /// Column track sizing functions converted to Taffy format
+    pub column_functions: Vec<taffy::TrackSizingFunction>,
+}
+
 /// Line name mapping for parent and local names
 #[derive(Debug, Clone)]
 pub struct LineNameMap {

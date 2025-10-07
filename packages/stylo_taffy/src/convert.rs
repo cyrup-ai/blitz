@@ -11,7 +11,7 @@ pub mod stylo {
     pub(crate) use style::properties::longhands::position::computed_value::T as Position;
     pub(crate) use style::values::computed::length_percentage::CalcLengthPercentage;
     pub(crate) use style::values::computed::length_percentage::Unpacked as UnpackedLengthPercentage;
-    pub(crate) use style::values::computed::{LengthPercentage, Percentage};
+    pub(crate) use style::values::computed::{Length, LengthPercentage, Percentage};
     pub(crate) use style::values::generics::NonNegative;
     pub(crate) use style::values::generics::length::{
         GenericLengthPercentageOrNormal, GenericMargin, GenericMaxSize, GenericSize,
@@ -43,7 +43,7 @@ pub mod stylo {
         computed_values::grid_auto_flow::T as GridAutoFlow,
         values::{
             computed::{GridLine, GridTemplateComponent, ImplicitGridTracks},
-            generics::grid::{RepeatCount, TrackBreadth, TrackListValue, TrackSize},
+            generics::grid::{RepeatCount, TrackBreadth, TrackList, TrackListValue, TrackRepeat, TrackSize},
             specified::GenericGridTemplateComponent,
         },
     };
@@ -54,6 +54,7 @@ pub mod stylo {
 // #[cfg(feature = "flexbox")]
 // use stylo::FlexBasis;
 
+use style::Atom;
 use style::OwnedSlice;
 use style::media_queries::Device;
 use style::values::CustomIdent;
@@ -1626,21 +1627,23 @@ fn taffy_min_track_to_stylo_breadth(
     input: &taffy::MinTrackSizingFunction,
 ) -> Option<stylo::TrackBreadth<stylo::LengthPercentage>> {
     use stylo::TrackBreadth;
-    use taffy::MinTrackSizingFunction;
+    use taffy::CompactLength;
 
-    // In taffy 0.9.1, these are structs with constants, not enum variants
-    if *input == MinTrackSizingFunction::AUTO {
-        Some(TrackBreadth::Auto)
-    } else if *input == MinTrackSizingFunction::MIN_CONTENT {
-        Some(TrackBreadth::MinContent)
-    } else if *input == MinTrackSizingFunction::MAX_CONTENT {
-        Some(TrackBreadth::MaxContent)
-    } else {
-        // For any other case (length/percentage), fallback to a reasonable default
-        // Since we can't access the internal value directly and there's no public API
-        // to extract it, we'll default to Auto for now
-        // TODO: This needs a proper solution when taffy provides access methods
-        Some(TrackBreadth::Auto)
+    let compact = input.into_raw();
+
+    match compact.tag() {
+        CompactLength::LENGTH_TAG => {
+            let length = stylo::Length::new(compact.value());
+            Some(TrackBreadth::Breadth(stylo::LengthPercentage::new_length(length)))
+        }
+        CompactLength::PERCENT_TAG => {
+            let percentage = stylo::Percentage(compact.value());
+            Some(TrackBreadth::Breadth(stylo::LengthPercentage::new_percent(percentage)))
+        }
+        CompactLength::AUTO_TAG => Some(TrackBreadth::Auto),
+        CompactLength::MIN_CONTENT_TAG => Some(TrackBreadth::MinContent),
+        CompactLength::MAX_CONTENT_TAG => Some(TrackBreadth::MaxContent),
+        _ => Some(TrackBreadth::Auto),
     }
 }
 
@@ -1650,21 +1653,47 @@ fn taffy_max_track_to_stylo_breadth(
     input: &taffy::MaxTrackSizingFunction,
 ) -> Option<stylo::TrackBreadth<stylo::LengthPercentage>> {
     use stylo::TrackBreadth;
-    use taffy::MaxTrackSizingFunction;
+    use taffy::CompactLength;
 
-    // In taffy 0.9.1, these are structs with constants, not enum variants
-    if *input == MaxTrackSizingFunction::AUTO {
-        Some(TrackBreadth::Auto)
-    } else if *input == MaxTrackSizingFunction::MIN_CONTENT {
-        Some(TrackBreadth::MinContent)
-    } else if *input == MaxTrackSizingFunction::MAX_CONTENT {
-        Some(TrackBreadth::MaxContent)
-    } else {
-        // For any other case (length/percentage/fraction/fit-content), fallback to a reasonable default
-        // Since we can't access the internal value directly and there's no public API
-        // to extract it, we'll default to Auto for now
-        // TODO: This needs a proper solution when taffy provides access methods
-        Some(TrackBreadth::Auto)
+    let compact = input.into_raw();
+
+    match compact.tag() {
+        CompactLength::LENGTH_TAG => {
+            let length = stylo::Length::new(compact.value());
+            Some(TrackBreadth::Breadth(stylo::LengthPercentage::new_length(length)))
+        }
+        CompactLength::PERCENT_TAG => {
+            let percentage = stylo::Percentage(compact.value());
+            Some(TrackBreadth::Breadth(stylo::LengthPercentage::new_percent(percentage)))
+        }
+        CompactLength::FR_TAG => {
+            Some(TrackBreadth::Fr(compact.value()))
+        }
+        CompactLength::FIT_CONTENT_PX_TAG => {
+            let length = stylo::Length::new(compact.value());
+            Some(TrackBreadth::Breadth(stylo::LengthPercentage::new_length(length)))
+        }
+        CompactLength::FIT_CONTENT_PERCENT_TAG => {
+            let percentage = stylo::Percentage(compact.value());
+            Some(TrackBreadth::Breadth(stylo::LengthPercentage::new_percent(percentage)))
+        }
+        CompactLength::AUTO_TAG => Some(TrackBreadth::Auto),
+        CompactLength::MIN_CONTENT_TAG => Some(TrackBreadth::MinContent),
+        CompactLength::MAX_CONTENT_TAG => Some(TrackBreadth::MaxContent),
+        _ => Some(TrackBreadth::Auto),
+    }
+}
+
+#[inline]
+#[cfg(feature = "grid")]
+fn taffy_repetition_count_to_stylo(input: taffy::RepetitionCount) -> stylo::RepeatCount<i32> {
+    use taffy::RepetitionCount;
+    use stylo::RepeatCount;
+    
+    match input {
+        RepetitionCount::AutoFill => RepeatCount::AutoFill,
+        RepetitionCount::AutoFit => RepeatCount::AutoFit,
+        RepetitionCount::Count(n) => RepeatCount::Number(n as i32),
     }
 }
 
@@ -1672,19 +1701,64 @@ fn taffy_max_track_to_stylo_breadth(
 #[cfg(feature = "grid")]
 pub fn taffy_template_tracks_to_stylo(
     input: &[taffy::GridTemplateComponent<String>],
-) -> stylo::GenericGridTemplateComponent<
-    stylo::ImplicitGridTracks,
-    style::values::generics::grid::GenericLineNameListValue<style::values::CustomIdent>,
-> {
+) -> stylo::GridTemplateComponent {
     use stylo::GenericGridTemplateComponent;
+    use style::OwnedSlice;
 
     if input.is_empty() {
         return GenericGridTemplateComponent::None;
     }
 
-    // TODO: Implement proper conversion from taffy GridTemplateComponent to stylo TrackList
-    // This is a complex type conversion that requires matching the exact generic parameters
-    // expected by the stylo GridTemplateComponent. For now, return None to allow compilation.
-    // The conversion logic above was correct but needs proper type parameter alignment.
-    GenericGridTemplateComponent::None
+    let mut track_list_values = Vec::with_capacity(input.len());
+
+    for component in input {
+        match component {
+            taffy::GridTemplateComponent::Single(track_sizing_fn) => {
+                let track_size = taffy_track_to_stylo(track_sizing_fn);
+                track_list_values.push(stylo::TrackListValue::TrackSize(track_size));
+            }
+            taffy::GridTemplateComponent::Repeat(repetition) => {
+                // Convert repeat count
+                let count = taffy_repetition_count_to_stylo(repetition.count);
+                
+                // Convert track sizes using existing helper
+                let track_sizes: Vec<_> = repetition.tracks.iter()
+                    .map(|track| taffy_track_to_stylo(track))
+                    .collect();
+                
+                // Convert line names: Vec<Vec<String>> -> OwnedSlice<OwnedSlice<CustomIdent>>
+                let line_names: Vec<OwnedSlice<CustomIdent>> = repetition.line_names.iter()
+                    .map(|names| {
+                        let custom_idents: Vec<CustomIdent> = names.iter()
+                            .map(|name| CustomIdent(Atom::from(name.as_str())))
+                            .collect();
+                        OwnedSlice::from(custom_idents)
+                    })
+                    .collect();
+                
+                // Build TrackRepeat
+                let track_repeat = stylo::TrackRepeat {
+                    count,
+                    line_names: OwnedSlice::from(line_names),
+                    track_sizes: OwnedSlice::from(track_sizes),
+                };
+                
+                // Push as TrackRepeat, not as TrackSize!
+                track_list_values.push(stylo::TrackListValue::TrackRepeat(track_repeat));
+            }
+        }
+    }
+
+    let line_names: Vec<OwnedSlice<style::values::CustomIdent>> =
+        (0..=track_list_values.len())
+            .map(|_| OwnedSlice::default())
+            .collect();
+
+    let track_list = stylo::TrackList {
+        auto_repeat_index: std::usize::MAX,
+        values: OwnedSlice::from(track_list_values),
+        line_names: OwnedSlice::from(line_names),
+    };
+
+    GenericGridTemplateComponent::TrackList(Box::new(track_list))
 }

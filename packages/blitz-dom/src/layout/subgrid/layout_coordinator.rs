@@ -225,6 +225,8 @@ impl GridLayoutCoordinator {
             },
             cross_axis_deps: Vec::new(),
             coordination_pass: 0,
+            previous_row_sizes: None,
+            previous_column_sizes: None,
         };
 
         self.intrinsic_sizing_states
@@ -267,8 +269,16 @@ impl GridLayoutCoordinator {
         // Phase 2: Calculate column axis sizes
         self.calculate_axis_intrinsic_sizes(grid_id, AbstractAxis::Inline)?;
 
-        // Phase 3: Check for convergence
-        self.check_intrinsic_sizing_convergence(grid_id)
+        // Phase 3: Check for convergence FIRST (compares previous from last pass vs current)
+        let converged = self.check_intrinsic_sizing_convergence(grid_id)?;
+
+        // Phase 4: Store current sizes as previous for NEXT pass comparison
+        if let Some(state) = self.intrinsic_sizing_states.get_mut(&grid_id) {
+            state.previous_row_sizes = Some(state.row_sizing.track_sizes.clone());
+            state.previous_column_sizes = Some(state.column_sizing.track_sizes.clone());
+        }
+
+        Ok(converged)
     }
 
     /// Calculate intrinsic sizes for one axis
@@ -295,17 +305,49 @@ impl GridLayoutCoordinator {
         Ok(())
     }
 
-    /// Check if intrinsic sizing has converged
+    /// Check if intrinsic sizing has converged by comparing track sizes between passes
     fn check_intrinsic_sizing_convergence(&self, grid_id: NodeId) -> SubgridResult<bool> {
-        // Simplified convergence check
-        // In full implementation this would compare track sizes between passes
+        const CONVERGENCE_TOLERANCE: f32 = 0.1;
 
         if let Some(state) = self.intrinsic_sizing_states.get(&grid_id) {
-            // Consider converged after first pass for now
-            Ok(state.coordination_pass > 0)
+            // First pass always returns false (not converged yet)
+            if state.coordination_pass == 0 {
+                return Ok(false);
+            }
+
+            // Check if we have previous sizes to compare against
+            let row_converged = match &state.previous_row_sizes {
+                Some(prev_sizes) => {
+                    Self::track_sizes_converged(prev_sizes, &state.row_sizing.track_sizes, CONVERGENCE_TOLERANCE)
+                }
+                None => false, // No previous data means not converged
+            };
+
+            let column_converged = match &state.previous_column_sizes {
+                Some(prev_sizes) => {
+                    Self::track_sizes_converged(prev_sizes, &state.column_sizing.track_sizes, CONVERGENCE_TOLERANCE)
+                }
+                None => false,
+            };
+
+            // Converged when both axes are stable
+            Ok(row_converged && column_converged)
         } else {
             Ok(false)
         }
+    }
+
+    /// Helper function for comparing track sizes with tolerance
+    #[inline]
+    fn track_sizes_converged(prev_sizes: &[f32], current_sizes: &[f32], tolerance: f32) -> bool {
+        if prev_sizes.len() != current_sizes.len() {
+            return false;
+        }
+
+        prev_sizes
+            .iter()
+            .zip(current_sizes.iter())
+            .all(|(prev, curr)| (prev - curr).abs() < tolerance)
     }
 
     /// Initialize masonry layout state

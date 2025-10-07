@@ -13,6 +13,7 @@ use taffy::{
 };
 
 use super::grid_preprocessing::preprocess_and_compute_grid_layout;
+use super::intrinsic_sizing::{calculate_line_height_from_metrics, extract_font_metrics_fallback};
 use super::replaced::{ReplacedContext, replaced_measure_function};
 use super::resolve_calc_value;
 use super::table::TableTreeWrapper;
@@ -125,14 +126,45 @@ impl LayoutPartialTree for BaseDocument {
         inputs: taffy::tree::LayoutInput,
     ) -> taffy::tree::LayoutOutput {
         compute_cached_layout(self, node_id, inputs, |tree, node_id, inputs| {
-            let node = &mut tree.nodes[node_id.into()];
+            // Extract style information first (before mutable borrow)
+            let font_info = {
+                let node = &tree.nodes[node_id.into()];
+                node.primary_styles().map(|style| {
+                    use style::values::computed::font::{SingleFontFamily, GenericFontFamily};
 
-            let font_styles = node.primary_styles().map(|style| {
+                    let font_size = style.clone_font_size().used_size().px();
+                    let line_height_style = style.clone_line_height();
+
+                    // Extract font family for metric-based line-height calculation
+                    let font_family = match style.get_font().font_family.families.iter().next() {
+                        Some(family) => match family {
+                            SingleFontFamily::FamilyName(name) => name.name.as_ref().to_string(),
+                            SingleFontFamily::Generic(generic) => match generic {
+                                GenericFontFamily::Serif => "serif".to_string(),
+                                GenericFontFamily::SansSerif => "sans-serif".to_string(),
+                                GenericFontFamily::Monospace => "monospace".to_string(),
+                                GenericFontFamily::Cursive => "cursive".to_string(),
+                                GenericFontFamily::Fantasy => "fantasy".to_string(),
+                                _ => "sans-serif".to_string(),
+                            }
+                        }
+                        None => "sans-serif".to_string(),
+                    };
+
+                    (font_size, line_height_style, font_family)
+                })
+            };
+
+            // Calculate line height (can now use tree immutably)
+            let font_styles = font_info.map(|(font_size, line_height_style, font_family)| {
                 use style::values::computed::font::LineHeight;
 
-                let font_size = style.clone_font_size().used_size().px();
-                let line_height = match style.clone_line_height() {
-                    LineHeight::Normal => font_size * 1.2,
+                let line_height = match line_height_style {
+                    LineHeight::Normal => {
+                        // CSS spec: use font metrics for 'normal' (CSS Inline Layout Module Level 3)
+                        let font_metrics = extract_font_metrics_fallback(tree, &font_family, font_size);
+                        calculate_line_height_from_metrics(&font_metrics, font_size, 0.0)
+                    },
                     LineHeight::Number(num) => font_size * num.0,
                     LineHeight::Length(value) => value.0.px(),
                     // Note: MozBlockHeight variant only available with gecko feature
@@ -142,6 +174,8 @@ impl LayoutPartialTree for BaseDocument {
             });
             let font_size = font_styles.map(|s| s.0);
             let resolved_line_height = font_styles.map(|s| s.1);
+
+            let node = &mut tree.nodes[node_id.into()];
 
             match &mut node.data {
                 NodeData::Text(data) => {

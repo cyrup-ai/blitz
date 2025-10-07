@@ -18,6 +18,7 @@ use crate::BaseDocument;
 pub struct MasonryConfig {
     pub track_count: usize,
     pub item_tolerance: f32,
+    pub dense_packing: bool,
 }
 
 /// Calculate track count and extract item-tolerance from computed styles
@@ -25,6 +26,7 @@ pub struct MasonryConfig {
 pub fn calculate_masonry_config(
     tree: &BaseDocument,
     node_id: NodeId,
+    inputs: &taffy::tree::LayoutInput,
 ) -> Result<MasonryConfig, GridPreprocessingError> {
     let node = tree.node_from_id(node_id.into());
     let computed_styles = node.primary_styles().ok_or_else(|| {
@@ -37,27 +39,37 @@ pub fn calculate_masonry_config(
 
     let style_wrapper = stylo_taffy::TaffyStyloStyle::from(computed_styles);
 
-    // Extract track count from the definite (non-masonry) axis
-    let track_count = if style_wrapper.has_masonry_rows() {
-        // Masonry rows: count explicit columns
-        style_wrapper
-            .grid_template_columns()
-            .map(|tracks| tracks.count())
-            .unwrap_or(1)
+    // Determine masonry axis
+    let masonry_axis = if style_wrapper.has_masonry_rows() {
+        AbstractAxis::Block
     } else {
-        // Masonry columns: count explicit rows
-        style_wrapper
-            .grid_template_rows()
-            .map(|tracks| tracks.count())
-            .unwrap_or(1)
+        AbstractAxis::Inline
     };
+
+    // Extract available size for grid axis
+    let available_size = match masonry_axis {
+        AbstractAxis::Block => inputs.known_dimensions.width,   // Masonry rows → use column size
+        AbstractAxis::Inline => inputs.known_dimensions.height, // Masonry columns → use row size
+    };
+
+    // Calculate track count using new auto-repeat-aware function
+    let track_count = super::track_counting::get_definite_axis_track_count(
+        tree,
+        node_id,
+        masonry_axis,
+        available_size,
+    )?;
 
     // Extract item-tolerance from computed styles using CSS Grid Level 3 properties
     let item_tolerance = extract_masonry_item_tolerance_from_styles(tree, node_id)?;
 
+    // Extract grid-auto-flow to detect dense keyword
+    let dense_packing = extract_dense_packing_from_styles(tree, node_id)?;
+
     Ok(MasonryConfig {
         track_count: track_count.max(1), // Ensure at least 1 track
         item_tolerance,
+        dense_packing,
     })
 }
 
@@ -81,6 +93,31 @@ fn extract_masonry_item_tolerance_from_styles(
     let font_size = computed_styles.clone_font_size().used_size().px();
     let tolerance = font_size; // Use actual font-size in pixels (1em equivalent)
     Ok(tolerance)
+}
+
+/// Extract dense packing configuration from grid-auto-flow
+/// Implements CSS Grid Level 3 dense packing detection
+fn extract_dense_packing_from_styles(
+    tree: &BaseDocument,
+    node_id: NodeId,
+) -> Result<bool, GridPreprocessingError> {
+    let node = tree.node_from_id(node_id.into());
+    let computed_styles = node.primary_styles().ok_or_else(|| {
+        GridPreprocessingError::preprocessing_failed(
+            "dense_packing_extraction",
+            node_id.into(),
+            "Primary styles not available",
+        )
+    })?;
+
+    let style_wrapper = stylo_taffy::TaffyStyloStyle::from(computed_styles);
+    let grid_auto_flow = style_wrapper.grid_auto_flow();
+
+    // Check for Dense variant using existing Taffy GridAutoFlow enum
+    Ok(matches!(
+        grid_auto_flow,
+        taffy::GridAutoFlow::RowDense | taffy::GridAutoFlow::ColumnDense
+    ))
 }
 
 /// Enhanced item collection that processes spans for intrinsic sizing

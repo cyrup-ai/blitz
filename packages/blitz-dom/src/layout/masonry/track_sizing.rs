@@ -269,18 +269,77 @@ fn extract_track_sizes_from_taffy_layout(
         )
     })?;
 
-    // For now, distribute available space evenly across tracks
-    // In the future, we could use Taffy's detailed grid info if available
+    // Get all children to analyze their positions and sizes
+    let children = taffy_tree.children(container_node).map_err(|_| {
+        GridPreprocessingError::preprocessing_failed(
+            "taffy_children_extraction",
+            0_usize,
+            "Failed to get Taffy container children",
+        )
+    })?;
+
+    if children.is_empty() || track_count == 0 {
+        // No children or no tracks - use even distribution fallback
+        let container_size = match masonry_axis {
+            AbstractAxis::Block => container_layout.size.width,
+            AbstractAxis::Inline => container_layout.size.height,
+        };
+        let track_size = if track_count > 0 {
+            container_size / track_count as f32
+        } else {
+            0.0
+        };
+        return Ok(vec![track_size; track_count]);
+    }
+
+    // Calculate track sizes based on actual child layout positions
+    let mut track_sizes = vec![0.0_f32; track_count];
+
+    // For each child, determine which track it's in and its contribution
+    for child_id in children {
+        let child_layout = taffy_tree.layout(child_id).map_err(|_| {
+            GridPreprocessingError::preprocessing_failed(
+                "taffy_child_layout_extraction",
+                0_usize,
+                "Failed to get child layout",
+            )
+        })?;
+
+        // Determine track index based on position
+        let (track_index, item_size) = match masonry_axis {
+            AbstractAxis::Block => {
+                // Masonry in block direction - tracks are columns (inline axis)
+                // Calculate which column this item is in based on its x position
+                let column_size = container_layout.size.width / track_count as f32;
+                let track_idx = (child_layout.location.x / column_size).floor() as usize;
+                (track_idx.min(track_count - 1), child_layout.size.width)
+            }
+            AbstractAxis::Inline => {
+                // Masonry in inline direction - tracks are rows (block axis)
+                // Calculate which row this item is in based on its y position
+                let row_size = container_layout.size.height / track_count as f32;
+                let track_idx = (child_layout.location.y / row_size).floor() as usize;
+                (track_idx.min(track_count - 1), child_layout.size.height)
+            }
+        };
+
+        // Update track size to be maximum of current size and item size
+        track_sizes[track_index] = track_sizes[track_index].max(item_size);
+    }
+
+    // Ensure all tracks have at least some minimum size if they're empty
     let container_size = match masonry_axis {
         AbstractAxis::Block => container_layout.size.width,
         AbstractAxis::Inline => container_layout.size.height,
     };
 
-    let track_size = if track_count > 0 {
-        container_size / track_count as f32
-    } else {
-        0.0
-    };
+    let min_track_size = container_size / track_count as f32;
+    for track_size in track_sizes.iter_mut() {
+        if *track_size < 1.0 {
+            // Empty track - use proportional share of container
+            *track_size = min_track_size;
+        }
+    }
 
-    Ok(vec![track_size; track_count])
+    Ok(track_sizes)
 }

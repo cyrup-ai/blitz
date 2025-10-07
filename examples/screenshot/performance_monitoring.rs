@@ -379,10 +379,13 @@ impl PerformanceMonitor {
         }
     }
     
-    /// Get current system resource usage (simplified estimation)
+    /// Get current system resource usage (simulated for demonstration)
+    /// 
+    /// Example demonstration: Returns simulated resource metrics for demonstration purposes.
+    /// Production implementations should use system monitoring crates like `sysinfo` or 
+    /// platform-specific APIs (e.g., `/proc` on Linux, Windows Performance Counters).
     fn get_resource_usage() -> (f64, f64) {
-        // In a real implementation, this would query actual system metrics
-        // For this example, we simulate realistic values
+        // Simulated values with realistic variance for example purposes
         let memory_mb = 45.0 + (rand::random::<f64>() * 20.0);
         let cpu_percent = 5.0 + (rand::random::<f64>() * 15.0);
         (memory_mb, cpu_percent)

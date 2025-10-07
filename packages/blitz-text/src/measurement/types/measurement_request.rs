@@ -19,6 +19,8 @@ pub struct MeasurementRequest {
     pub language: Option<String>,
     /// Text direction (for bidirectional text)
     pub direction: Option<TextDirection>,
+    /// Font family name for text shaping
+    pub font_family: Option<String>,
 }
 
 /// Text direction for bidirectional text support
@@ -49,6 +51,7 @@ impl MeasurementRequest {
             enable_shaping: true,
             language: None,
             direction: Some(TextDirection::Auto),
+            font_family: None,
         }
     }
 
@@ -62,6 +65,7 @@ impl MeasurementRequest {
             enable_shaping: true,
             language: None,
             direction: Some(TextDirection::Auto),
+            font_family: None,
         }
     }
 
@@ -114,6 +118,7 @@ impl Default for MeasurementRequest {
             enable_shaping: true,
             language: None,
             direction: Some(TextDirection::Auto),
+            font_family: None,
         }
     }
 }

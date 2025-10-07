@@ -8,17 +8,19 @@ use super::types::*;
 
 impl GridLayoutCoordinator {
     /// Enhanced auto-placement implementation with CSS order processing
-    pub fn auto_place_items(
+    pub fn auto_place_items<Tree>(
         &self,
-        _subgrid_id: NodeId,
+        subgrid_id: NodeId,
         placement_state: &mut AutoPlacementState,
-    ) -> Result<Vec<ItemPlacement>, GridPreprocessingError> {
+        tree: &Tree,
+    ) -> Result<Vec<ItemPlacement>, GridPreprocessingError>
+    where
+        Tree: taffy::LayoutGridContainer,
+    {
         let mut placements = Vec::new();
 
-        // Process items in CSS order (sorted by order property)
-        placement_state
-            .ordered_items
-            .sort_by_key(|(_, order)| *order);
+        // Items are already sorted by CSS order in placement_state.ordered_items
+        // (sorted by get_items_in_css_order() before this is called)
 
         // Collect items to avoid borrow checker issues
         let items_to_process: Vec<_> = placement_state
@@ -29,68 +31,216 @@ impl GridLayoutCoordinator {
             .collect();
 
         for item_id in items_to_process {
-            // Find placement using cursor algorithm
-            let placement = self.find_auto_placement(item_id, placement_state)?;
-            placements.push(placement.clone());
+            // Get item's grid spans from style
+            let (row_span, col_span) = self.get_item_spans(item_id, tree)?;
+
+            // Find placement using cursor
+            let position = self.find_placement_from_cursor(
+                placement_state,
+                row_span,
+                col_span,
+            )?;
+
+            // Create placement
+            let placement = ItemPlacement {
+                node_id: item_id,
+                grid_area: GridArea {
+                    row_start: position.row,
+                    row_end: position.row + row_span as i32,
+                    column_start: position.column,
+                    column_end: position.column + col_span as i32,
+                },
+                placement_method: PlacementMethod::AutoPlacement,
+            };
 
             // Update track occupancy
-            self.update_track_occupancy(&placement, placement_state)?;
+            placement_state.track_occupancy.mark_area_occupied(&placement);
 
-            // Advance placement cursor
-            self.advance_placement_cursor(placement_state, &placement)?;
+            // Advance cursor based on flow direction
+            self.advance_cursor_after_placement(placement_state, &placement, row_span, col_span)?;
+
+            placements.push(placement);
         }
 
         Ok(placements)
     }
 
+    /// Get item spans from grid style
+    fn get_item_spans<Tree>(
+        &self,
+        item_id: NodeId,
+        tree: &Tree,
+    ) -> Result<(usize, usize), GridPreprocessingError>
+    where
+        Tree: taffy::LayoutGridContainer,
+    {
+        use taffy::GridItemStyle;
+        use taffy::GridPlacement;
+
+        let style = tree.get_grid_child_style(item_id);
+
+        // Get row span
+        let row_span = match (style.grid_row().start, style.grid_row().end) {
+            (GridPlacement::Span(n), _) => n as usize,
+            (_, GridPlacement::Span(n)) => n as usize,
+            _ => 1, // Default span
+        };
+
+        // Get column span
+        let col_span = match (style.grid_column().start, style.grid_column().end) {
+            (GridPlacement::Span(n), _) => n as usize,
+            (_, GridPlacement::Span(n)) => n as usize,
+            _ => 1, // Default span
+        };
+
+        Ok((row_span, col_span))
+    }
+
+    /// Find placement position from current cursor
+    fn find_placement_from_cursor(
+        &self,
+        placement_state: &AutoPlacementState,
+        row_span: usize,
+        col_span: usize,
+    ) -> Result<GridPosition, GridPreprocessingError> {
+        // Use TrackOccupancyMap to find next available position
+        let position = placement_state.track_occupancy.find_next_available(
+            row_span,
+            col_span,
+            placement_state.cursor_position.row,
+            placement_state.cursor_position.column,
+        );
+
+        if let Some(pos) = position {
+            Ok(pos)
+        } else {
+            // If no position found, try from beginning (grid might need to grow)
+            // For now, return error - proper implementation would grow the grid
+            Err(GridPreprocessingError::PreprocessingFailed {
+                operation: "auto_placement".to_string(),
+                node_id: 0,
+                details: "No available position found for auto-placement".to_string(),
+            })
+        }
+    }
+
+    /// Advance cursor after placement based on flow direction
+    fn advance_cursor_after_placement(
+        &self,
+        placement_state: &mut AutoPlacementState,
+        placement: &ItemPlacement,
+        _row_span: usize,
+        _col_span: usize,
+    ) -> Result<(), GridPreprocessingError> {
+        // For now, implement row flow (default grid-auto-flow: row)
+        // Cursor moves to the cell after the placed item's column end
+
+        // Move to column after the placed item
+        placement_state.cursor_position.column = placement.grid_area.column_end;
+
+        // If past grid width, move to next row and column 0
+        if placement_state.cursor_position.column >= placement_state.track_occupancy.grid_size.column {
+            placement_state.cursor_position.column = 0;
+            placement_state.cursor_position.row += 1;
+        }
+
+        Ok(())
+    }
+
     /// Dense packing implementation for backfill algorithm
-    pub fn dense_packing_pass(
+    pub fn dense_packing_pass<Tree>(
         &self,
         _subgrid_id: NodeId,
         placement_state: &mut AutoPlacementState,
-    ) -> Result<Vec<ItemPlacement>, GridPreprocessingError> {
-        let dense_state_enabled = placement_state
+        tree: &Tree,
+    ) -> Result<Vec<ItemPlacement>, GridPreprocessingError>
+    where
+        Tree: taffy::LayoutGridContainer,
+    {
+        // Check if dense packing is enabled
+        let dense_enabled = placement_state
             .dense_packing_state
             .as_ref()
             .map(|ds| ds.enabled)
             .unwrap_or(false);
 
-        if !dense_state_enabled {
+        if !dense_enabled {
             return Ok(Vec::new());
         }
 
         let mut dense_placements = Vec::new();
 
-        // Collect pending items to avoid borrowing issues
+        // Get pending items that haven't been placed yet
         let pending_items: Vec<NodeId> = placement_state
             .dense_packing_state
             .as_ref()
             .map(|ds| ds.pending_items.clone())
             .unwrap_or_default();
 
-        // Process pending items for dense packing
         for item_id in pending_items {
-            // Try to find placement in unfilled positions
-            if let Some(dense_state) = &mut placement_state.dense_packing_state {
-                if let Some(position) = self.find_dense_placement(item_id, dense_state)? {
-                    let placement = ItemPlacement {
-                        node_id: item_id,
-                        grid_area: GridArea {
-                            row_start: position.row,
-                            row_end: position.row + 1,
-                            column_start: position.column,
-                            column_end: position.column + 1,
-                        },
-                        placement_method: PlacementMethod::DensePacking,
-                    };
+            // Get item spans
+            let (row_span, col_span) = self.get_item_spans(item_id, tree)?;
 
-                    dense_placements.push(placement.clone());
-                    self.update_track_occupancy(&placement, placement_state)?;
-                }
+            // KEY DIFFERENCE: Search from position (0, 0) for EACH item
+            // Don't use the cursor - always start from beginning
+            let position = self.find_first_available_position(
+                placement_state,
+                row_span,
+                col_span,
+            )?;
+
+            if let Some(pos) = position {
+                let placement = ItemPlacement {
+                    node_id: item_id,
+                    grid_area: GridArea {
+                        row_start: pos.row,
+                        row_end: pos.row + row_span as i32,
+                        column_start: pos.column,
+                        column_end: pos.column + col_span as i32,
+                    },
+                    placement_method: PlacementMethod::DensePacking,
+                };
+
+                placement_state.track_occupancy.mark_area_occupied(&placement);
+                dense_placements.push(placement);
             }
         }
 
         Ok(dense_placements)
+    }
+
+    /// Find first available position searching from beginning (for dense packing)
+    fn find_first_available_position(
+        &self,
+        state: &AutoPlacementState,
+        row_span: usize,
+        col_span: usize,
+    ) -> Result<Option<GridPosition>, GridPreprocessingError> {
+        let grid_size = &state.track_occupancy.grid_size;
+
+        // For dense mode: Always search from (0, 0) to fill gaps
+        // Respect flow direction even in dense mode
+        // For row flow: iterate columns within rows
+        // For column flow: iterate rows within columns
+
+        for row in 0..grid_size.row {
+            for col in 0..grid_size.column {
+                let row_end = row + row_span as i32;
+                let col_end = col + col_span as i32;
+
+                // Check bounds
+                if row_end > grid_size.row || col_end > grid_size.column {
+                    continue;
+                }
+
+                // Check if area is available
+                if state.track_occupancy.is_area_available(row, row_end, col, col_end) {
+                    return Ok(Some(GridPosition { row, column: col }));
+                }
+            }
+        }
+
+        Ok(None) // No available position found
     }
 
     /// Find auto placement for an item

@@ -39,6 +39,7 @@ pub struct CssHandler {
     pub source_url: Url,
     pub guard: SharedRwLock,
     pub provider: SharedProvider<Resource>,
+    pub quirks_mode: QuirksMode,
 }
 
 #[derive(Clone)]
@@ -161,7 +162,7 @@ impl NetHandler<Resource> for CssHandler {
             self.guard.clone(),
             Some(&StylesheetLoader(doc_id, self.provider.clone())),
             None,
-            QuirksMode::NoQuirks,
+            self.quirks_mode,
             AllowImportRules::Yes,
         );
         let read_guard = self.guard.read();

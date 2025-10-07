@@ -15,7 +15,8 @@ pub use glyphon::{
 use wgpu::{DepthStencilState, Device, MultisampleState};
 
 use crate::custom_glyphs::{
-    AtlasProcessor, CustomGlyphCache, CustomGlyphError, CustomGlyphRegistry,
+    system::codepoint_to_compact_id, AtlasProcessor, CustomGlyphCache, CustomGlyphError,
+    CustomGlyphRegistry,
 };
 use crate::gpu::GpuRenderConfig;
 
@@ -173,11 +174,9 @@ impl EnhancedTextRenderer {
                         if AtlasProcessor::is_emoji_codepoint(codepoint)
                             || AtlasProcessor::is_icon_codepoint(codepoint)
                         {
-                            // Map codepoint to compact ID using offset-based indexing
-                            let id = if AtlasProcessor::is_emoji_codepoint(codepoint) {
-                                (codepoint - 0x1F600) as u16
-                            } else {
-                                ((codepoint - 0xE000) + 256) as u16
+                            // Map codepoint to compact ID using helper function
+                            let Some(id) = codepoint_to_compact_id(codepoint) else {
+                                continue;
                             };
 
                             // Create CustomGlyph for glyphon

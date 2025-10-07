@@ -353,9 +353,6 @@ impl crate::document::BaseDocument {
         }
 
         // Rule 3: Check for layout containment (creates independent formatting context)
-        // Note: This would need the actual containment property access
-        // For now, assume no containment since it's less common
-        // Check for layout containment property
         let contain = primary_styles.clone_contain();
         let has_layout_containment = contain.contains(style::values::specified::Contain::LAYOUT);
 
@@ -596,7 +593,7 @@ impl<'a> TDocument for BlitzNode<'a> {
     }
 
     fn quirks_mode(&self) -> QuirksMode {
-        QuirksMode::NoQuirks
+        self.quirks_mode
     }
 
     fn shared_lock(&self) -> &SharedRwLock {
@@ -1417,7 +1414,9 @@ impl<'a> TElement for BlitzNode<'a> {
         &self,
         _display: &style::values::specified::Display,
     ) -> euclid::default::Size2D<Option<app_units::Au>> {
-        // FIXME: Implement container queries. For now this effectively disables them without panicking.
+        // TODO: Implement CSS Container Queries (@container rules)
+        // Returns Default::default() which effectively disables container queries
+        // See: https://developer.mozilla.org/en-US/docs/Web/CSS/CSS_containment/Container_queries
         Default::default()
     }
 

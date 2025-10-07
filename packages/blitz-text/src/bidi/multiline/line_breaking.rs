@@ -8,6 +8,8 @@ use unicode_linebreak::{linebreaks, BreakOpportunity};
 use cosmyc_text::{Attrs, Buffer, FontSystem, Metrics, Shaping};
 
 use super::super::types::{BidiError, LineBreakInfo, ProcessedBidi};
+use crate::line_breaking::LineBreakAnalyzer;
+use crate::shaping::types::{ShapedRun, TextDirection};
 
 /// Line breaking processor for multi-line text
 pub struct LineBreaker {
@@ -139,26 +141,34 @@ impl LineBreaker {
         font_system: &mut FontSystem,
         metrics: Metrics,
     ) -> Result<Vec<usize>, BidiError> {
-        // This would implement algorithms like Knuth-Plass line breaking
-        // For now, use simple greedy approach
-        let _ = processed_bidi; // Suppress false positive - variable is used in should_break_line call
-        let break_opportunities: Vec<_> = linebreaks(text).collect();
+        // Use sophisticated LineBreakAnalyzer instead of simple greedy approach
+        let mut analyzer = LineBreakAnalyzer::new();
         let mut optimal_breaks = Vec::new();
-        let mut current_line_start = 0;
 
-        for break_opportunity in break_opportunities {
-            let break_position = break_opportunity.0;
+        // Need to create ShapedRun from processed bidi for analysis
+        // For each visual run, find break opportunities
+        for visual_run in &processed_bidi.visual_runs {
+            // Create temporary ShapedRun for this visual run
+            let temp_run = self.create_shaped_run_from_visual(visual_run, font_system, metrics)?;
 
-            if self.should_break_line(text, current_line_start, break_position, processed_bidi, font_system, metrics)? {
-                optimal_breaks.push(break_position);
-                current_line_start = break_position;
-            }
+            // Get break opportunities with priorities and penalties
+            let opportunities = analyzer
+                .find_break_opportunities(&temp_run)
+                .map_err(|e| BidiError::LineBreakingFailed(e.to_string()))?;
+
+            // Select breaks based on width constraints and penalties
+            let selected = self.select_breaks_by_penalty(
+                &opportunities,
+                &temp_run,
+                visual_run.start_index,
+            )?;
+
+            optimal_breaks.extend(selected);
         }
 
-        // Add final break if needed
-        if current_line_start < text.len() {
-            optimal_breaks.push(text.len());
-        }
+        // Sort breaks by position
+        optimal_breaks.sort_unstable();
+        optimal_breaks.dedup();
 
         Ok(optimal_breaks)
     }
@@ -201,5 +211,136 @@ impl LineBreaker {
         };
 
         Ok(width_penalty + char_penalty)
+    }
+
+    /// Helper: Select breaks using penalty-based algorithm
+    fn select_breaks_by_penalty(
+        &self,
+        opportunities: &[crate::line_breaking::types::BreakOpportunity],
+        run: &ShapedRun,
+        base_offset: usize,
+    ) -> Result<Vec<usize>, BidiError> {
+        let mut selected = Vec::new();
+        let mut current_width = 0.0;
+        let mut last_break = 0;
+        let mut last_valid_break: Option<(usize, usize)> = None; // (position, glyph_index)
+
+        for opp in opportunities {
+            let segment_width = self.calculate_segment_width(run, last_break, opp.position)?;
+
+            // Check if adding this segment would exceed max_width
+            if current_width + segment_width > self.max_width {
+                // Need to break at the LAST valid position, not current
+                if let Some((break_pos, break_glyph_idx)) = last_valid_break {
+                    selected.push(base_offset + break_pos);
+                    // Reset from the break position
+                    last_break = break_glyph_idx;
+                    // Recalculate width from break position to current opportunity
+                    current_width = self.calculate_segment_width(run, last_break, opp.position)?;
+                    last_valid_break = None;
+                } else {
+                    // No valid break found, force break at current position
+                    selected.push(base_offset + opp.position);
+                    current_width = 0.0;
+                    last_break = opp.position;
+                    last_valid_break = None;
+                }
+            } else {
+                // This segment fits, continue accumulating
+                current_width += segment_width;
+            }
+
+            // Track this as a potential break point if priority is sufficient
+            if opp.priority >= crate::line_breaking::types::BreakPriority::Normal {
+                last_valid_break = Some((opp.position, opp.position));
+            }
+        }
+
+        Ok(selected)
+    }
+
+    /// Helper: Create ShapedRun from VisualRun for analysis
+    fn create_shaped_run_from_visual(
+        &self,
+        visual_run: &crate::bidi::types::VisualRun,
+        font_system: &mut FontSystem,
+        metrics: Metrics,
+    ) -> Result<ShapedRun, BidiError> {
+        // Convert Direction to TextDirection
+        let direction = match visual_run.direction {
+            crate::bidi::types::Direction::LeftToRight => TextDirection::LeftToRight,
+            crate::bidi::types::Direction::RightToLeft => TextDirection::RightToLeft,
+            crate::bidi::types::Direction::Auto => TextDirection::LeftToRight,
+        };
+
+        // Create a Buffer to properly shape the text and extract glyphs
+        let mut temp_buffer = Buffer::new(font_system, metrics);
+        temp_buffer.set_text(
+            font_system,
+            &visual_run.text,
+            &Attrs::new(),
+            Shaping::Advanced,
+        );
+        temp_buffer.set_size(font_system, Some(f32::INFINITY), None);
+
+        // Extract glyphs from shaped layout runs
+        let mut glyphs = Vec::new();
+        let mut total_width: f32 = 0.0;
+        let mut max_ascent: f32 = 0.0;
+        let mut max_descent: f32 = 0.0;
+
+        for layout_run in temp_buffer.layout_runs() {
+            max_ascent = max_ascent.max(layout_run.line_height * 0.8);
+            max_descent = max_descent.max(layout_run.line_height * 0.2);
+
+            for glyph in layout_run.glyphs {
+                glyphs.push(crate::shaping::types::ShapedGlyph {
+                    glyph_id: glyph.glyph_id,
+                    cluster: glyph.start as u32,
+                    x_advance: glyph.w,
+                    y_advance: 0.0,
+                    x_offset: glyph.x,
+                    y_offset: glyph.y,
+                    flags: crate::shaping::types::GlyphFlags::empty(),
+                    font_size: metrics.font_size,
+                    color: None,
+                });
+                total_width += glyph.w;
+            }
+        }
+
+        let level = unicode_bidi::Level::new(visual_run.level).map_err(|e| {
+            BidiError::ProcessingFailed(format!("Invalid bidi level: {:?}", e))
+        })?;
+
+        Ok(ShapedRun {
+            glyphs,
+            script: visual_run.script.clone().into(),
+            direction,
+            language: None,
+            level,
+            width: total_width,
+            height: max_ascent + max_descent,
+            ascent: max_ascent,
+            descent: max_descent,
+            line_gap: metrics.line_height - max_ascent - max_descent,
+            start_index: visual_run.start_index,
+            end_index: visual_run.end_index,
+        })
+    }
+
+    /// Helper: Calculate width of text segment
+    fn calculate_segment_width(
+        &self,
+        run: &ShapedRun,
+        start: usize,
+        end: usize,
+    ) -> Result<f32, BidiError> {
+        let end_pos = end.min(run.glyphs.len());
+        if start >= end_pos {
+            return Ok(0.0);
+        }
+        let segment_glyphs = &run.glyphs[start..end_pos];
+        Ok(segment_glyphs.iter().map(|g| g.x_advance).sum())
     }
 }

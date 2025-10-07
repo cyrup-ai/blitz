@@ -74,6 +74,45 @@ pub fn style(node_id: usize, computed: &ComputedValues) -> CosmicStyle {
         (components[3].clamp(0.0, 1.0) * 255.0) as u8,
     );
 
+    // Determine text wrap mode from CSS properties
+    let wrap = {
+        use style::properties::longhands::overflow_wrap::computed_value::T as OverflowWrap;
+        use style::properties::longhands::text_wrap_mode::computed_value::T as TextWrapMode;
+        use style::properties::longhands::word_break::computed_value::T as WordBreak;
+
+        // white-space has highest priority
+        match text.white_space_collapse {
+            WhiteSpaceCollapse::Collapse => {
+                // Check text-wrap-mode
+                match text.text_wrap_mode {
+                    TextWrapMode::Wrap => {
+                        // Further refined by word-break
+                        match text.word_break {
+                            WordBreak::BreakAll => Wrap::Glyph,
+                            _ => {
+                                // Check overflow-wrap for WordOrGlyph
+                                match text.overflow_wrap {
+                                    OverflowWrap::Anywhere | OverflowWrap::BreakWord => Wrap::WordOrGlyph,
+                                    _ => Wrap::Word,
+                                }
+                            }
+                        }
+                    }
+                    TextWrapMode::Nowrap => Wrap::None,
+                    _ => Wrap::Word,
+                }
+            }
+            WhiteSpaceCollapse::Preserve | WhiteSpaceCollapse::PreserveBreaks => {
+                // pre and pre-line can still wrap
+                match text.text_wrap_mode {
+                    TextWrapMode::Wrap => Wrap::Word,
+                    _ => Wrap::None,
+                }
+            }
+            WhiteSpaceCollapse::BreakSpaces => Wrap::WordOrGlyph,
+        }
+    };
+
     CosmicStyle {
         attrs: AttrsOwned {
             color_opt: Some(text_color),
@@ -91,7 +130,7 @@ pub fn style(node_id: usize, computed: &ComputedValues) -> CosmicStyle {
             font_size: font_size_px,
             line_height,
         },
-        wrap: Wrap::Word, // Default wrap mode for now
+        wrap,
     }
 }
 
