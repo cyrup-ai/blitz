@@ -2,11 +2,10 @@
 //!
 //! Handles counting of tracks in the definite (non-masonry) axis.
 
-use taffy::{GridContainerStyle, GenericRepetition, ResolveOrZero};
+use taffy::{GridContainerStyle, ResolveOrZero};
 use taffy::geometry::AbstractAxis;
 use taffy::prelude::NodeId;
 use taffy::RepetitionCount;
-use style::servo_arc;
 
 use super::super::grid_errors::GridPreprocessingError;
 use crate::BaseDocument;

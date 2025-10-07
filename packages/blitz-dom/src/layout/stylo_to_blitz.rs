@@ -99,7 +99,6 @@ pub fn style(node_id: usize, computed: &ComputedValues) -> CosmicStyle {
                         }
                     }
                     TextWrapMode::Nowrap => Wrap::None,
-                    _ => Wrap::Word,
                 }
             }
             WhiteSpaceCollapse::Preserve | WhiteSpaceCollapse::PreserveBreaks => {

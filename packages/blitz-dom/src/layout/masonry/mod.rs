@@ -3,7 +3,7 @@
 //! This module implements the "shortest track placement" algorithm
 //! for masonry layout as specified in the CSS Grid Level 3 specification.
 
-use taffy::{GridContainerStyle, GenericRepetition};
+use taffy::GridContainerStyle;
 use taffy::geometry::AbstractAxis;
 use taffy::prelude::NodeId;
 

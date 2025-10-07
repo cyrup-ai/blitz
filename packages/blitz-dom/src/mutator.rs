@@ -5,7 +5,6 @@ use std::ops::{Deref, DerefMut};
 use blitz_text::Edit;
 use blitz_traits::net::Request;
 use blitz_traits::shell::Viewport;
-use markup5ever::LocalName;
 use style::invalidation::element::restyle_hints::RestyleHint;
 use style::stylesheets::OriginSet;
 
