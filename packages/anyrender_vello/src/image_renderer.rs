@@ -48,7 +48,7 @@ impl ImageRenderer for VelloImageRenderer {
         let queue = device_handle.queue;
 
         // Create renderer
-        let renderer = vello::Renderer::new(
+        let mut renderer = vello::Renderer::new(
             &device,
             RendererOptions {
                 use_cpu: false,
@@ -58,6 +58,11 @@ impl ImageRenderer for VelloImageRenderer {
             },
         )
         .expect("Got non-Send/Sync error from creating renderer");
+
+        // Initialize vello resolver with GPU context for text rendering
+        renderer
+            .initialize_resolver(&device, &queue, TextureFormat::Rgba8Unorm)
+            .expect("Failed to initialize vello resolver for text rendering");
 
         let texture = device.create_texture(&TextureDescriptor {
             label: Some("Target texture"),

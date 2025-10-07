@@ -2,10 +2,11 @@
 //!
 //! Handles counting of tracks in the definite (non-masonry) axis.
 
-use taffy::GridContainerStyle;
+use taffy::{GridContainerStyle, GenericRepetition, ResolveOrZero};
 use taffy::geometry::AbstractAxis;
 use taffy::prelude::NodeId;
 use taffy::RepetitionCount;
+use style::servo_arc;
 
 use super::super::grid_errors::GridPreprocessingError;
 use crate::BaseDocument;
@@ -20,7 +21,7 @@ where
         .filter_map(|component| match component {
             taffy::GenericGridTemplateComponent::Single(_) => None,
             taffy::GenericGridTemplateComponent::Repeat(repeat) => {
-                match repeat.count() {
+                match repeat.count {
                     RepetitionCount::AutoFill => Some(RepetitionCount::AutoFill),
                     RepetitionCount::AutoFit => Some(RepetitionCount::AutoFit),
                     RepetitionCount::Count(_) => None,
@@ -75,8 +76,8 @@ pub fn calculate_auto_repeat_track_count(
     let non_auto_count: u16 = tracks.clone()
         .map(|track_def| match track_def {
             taffy::GenericGridTemplateComponent::Single(_) => 1,
-            taffy::GenericGridTemplateComponent::Repeat(repeat) => match repeat.count() {
-                RepetitionCount::Count(count) => count * repeat.track_count(),
+            taffy::GenericGridTemplateComponent::Repeat(repeat) => match repeat.count {
+                RepetitionCount::Count(count) => count * (repeat.tracks.len() as u16),
                 RepetitionCount::AutoFill | RepetitionCount::AutoFit => 0,
             },
         })
@@ -86,7 +87,7 @@ pub fn calculate_auto_repeat_track_count(
     let auto_repeat = tracks.clone()
         .find_map(|def| match def {
             taffy::GenericGridTemplateComponent::Single(_) => None,
-            taffy::GenericGridTemplateComponent::Repeat(repeat) => match repeat.count() {
+            taffy::GenericGridTemplateComponent::Repeat(repeat) => match repeat.count {
                 RepetitionCount::AutoFill | RepetitionCount::AutoFit => Some(repeat),
                 _ => None,
             },
@@ -97,25 +98,25 @@ pub fn calculate_auto_repeat_track_count(
         return Ok(count_tracks_with_one_auto_repetition(tracks));
     };
 
-    let repeat_track_count = auto_repeat.track_count();
+    let repeat_track_count = auto_repeat.tracks.len() as u16;
 
     // Calculate space used by non-repeating tracks
-    let non_repeating_space: f32 = calculate_track_space(tracks.clone(), &style_wrapper, container_size, true);
+    let non_repeating_space: f32 = calculate_track_space(tracks.clone(), (), container_size, true);
 
     // Calculate space per repetition
-    let per_repetition_space: f32 = auto_repeat.tracks()
-        .map(|sizing_fn| estimate_track_size(sizing_fn, container_size))
+    let per_repetition_space: f32 = auto_repeat.tracks.iter()
+        .map(|sizing_fn| estimate_track_size(*sizing_fn, container_size))
         .sum();
 
     // Get gap size
     let gap_size = match masonry_axis {
         AbstractAxis::Block => {
             // Masonry rows → columns have horizontal gap
-            style_wrapper.gap().width.resolve_or_zero(Some(container_size))
+            style_wrapper.gap().width.resolve_or_zero(Some(container_size), |_, _| 0.0)
         }
         AbstractAxis::Inline => {
             // Masonry columns → rows have vertical gap
-            style_wrapper.gap().height.resolve_or_zero(Some(container_size))
+            style_wrapper.gap().height.resolve_or_zero(Some(container_size), |_, _| 0.0)
         }
     };
 
@@ -146,9 +147,9 @@ where
     tracks
         .map(|track_def| match track_def {
             taffy::GenericGridTemplateComponent::Single(_) => 1,
-            taffy::GenericGridTemplateComponent::Repeat(repeat) => match repeat.count() {
-                RepetitionCount::Count(count) => (count * repeat.track_count()) as usize,
-                RepetitionCount::AutoFill | RepetitionCount::AutoFit => repeat.track_count() as usize,
+            taffy::GenericGridTemplateComponent::Repeat(repeat) => match repeat.count {
+                RepetitionCount::Count(count) => (count * (repeat.tracks.len() as u16)) as usize,
+                RepetitionCount::AutoFill | RepetitionCount::AutoFit => repeat.tracks.len(),
             },
         })
         .sum()
@@ -178,7 +179,7 @@ fn estimate_track_size(sizing_fn: taffy::TrackSizingFunction, parent_size: f32) 
 /// Calculate total space used by tracks (excluding auto-repeat if exclude_auto = true)
 fn calculate_track_space<'a, I>(
     tracks: I,
-    style: &stylo_taffy::TaffyStyloStyle<&servo_arc::Arc<style::properties::ComputedValues>>,
+    _style: impl std::any::Any,
     container_size: f32,
     exclude_auto: bool,
 ) -> f32
@@ -191,17 +192,17 @@ where
                 estimate_track_size(sizing_fn, container_size)
             }
             taffy::GenericGridTemplateComponent::Repeat(repeat) => {
-                match repeat.count() {
+                match repeat.count {
                     RepetitionCount::Count(count) => {
-                        let sum: f32 = repeat.tracks()
-                            .map(|sf| estimate_track_size(sf, container_size))
+                        let sum: f32 = repeat.tracks.iter()
+                            .map(|sf| estimate_track_size(*sf, container_size))
                             .sum();
                         sum * (count as f32)
                     }
                     RepetitionCount::AutoFill | RepetitionCount::AutoFit => {
                         if exclude_auto { 0.0 } else {
-                            repeat.tracks()
-                                .map(|sf| estimate_track_size(sf, container_size))
+                            repeat.tracks.iter()
+                                .map(|sf| estimate_track_size(*sf, container_size))
                                 .sum()
                         }
                     }

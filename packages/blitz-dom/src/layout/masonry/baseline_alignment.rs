@@ -10,8 +10,13 @@ use taffy::prelude::NodeId;
 
 use super::super::grid_errors::GridPreprocessingError;
 use super::super::intrinsic_sizing::extract_font_metrics_fallback;
-use crate::node::ElementNodeData;
+use crate::node::ElementData;
 use crate::BaseDocument;
+
+// Import traits to use align_self() and justify_self() methods
+use taffy::FlexboxItemStyle;
+use taffy::GridItemStyle;
+use taffy::ResolveOrZero;
 
 /// Baseline alignment information for a masonry item
 #[derive(Debug, Clone)]
@@ -58,9 +63,10 @@ pub fn should_align_baseline(
         let style_wrapper = stylo_taffy::TaffyStyloStyle::from(styles);
 
         // Check align-self in the masonry axis direction
+        // Use explicit trait methods to disambiguate
         let align_value = match masonry_axis {
-            AbstractAxis::Block => style_wrapper.align_self(),
-            AbstractAxis::Inline => style_wrapper.justify_self(),
+            AbstractAxis::Block => FlexboxItemStyle::align_self(&style_wrapper),
+            AbstractAxis::Inline => GridItemStyle::justify_self(&style_wrapper),
         };
 
         // Check for baseline alignment values
@@ -78,21 +84,16 @@ pub fn extract_item_baseline(
 ) -> Option<f32> {
     let node = tree.node_from_id(item_id.into());
 
-    // Method 1: Check if item has LayoutOutput with baseline
-    // (Currently all return Point::NONE, but this prepares for future)
-    let layout = node.unrounded_layout;
-    if layout.first_baselines.y.is_some() {
-        return layout.first_baselines.y;
-    }
-
-    // Method 2: Calculate from font metrics for text content
+    // Method 1: Calculate from font metrics for text content
+    // Note: Layout type doesn't have first_baselines field (that's only in LayoutOutput)
+    // Future: Could store baseline in custom cache if needed
     if let Some(element) = node.data.downcast_element() {
         if let Some(styles) = node.primary_styles() {
-            return calculate_baseline_from_font_metrics(tree, element, styles);
+            return calculate_baseline_from_font_metrics(tree, element, &*styles);
         }
     }
 
-    // Method 3: For replaced elements, use margin box bottom
+    // Method 2: For replaced elements, use margin box bottom
     // (per CSS spec: replaced elements use their margin box)
     None // Item has no baseline, will use height as fallback
 }
@@ -100,7 +101,7 @@ pub fn extract_item_baseline(
 /// Calculate baseline from font metrics
 fn calculate_baseline_from_font_metrics(
     tree: &BaseDocument,
-    _element: &ElementNodeData,
+    _element: &ElementData,
     styles: &style::properties::ComputedValues,
 ) -> Option<f32> {
     let font = styles.get_font();
@@ -168,7 +169,9 @@ fn extract_top_margin(
         };
 
         // Resolve margin to pixels (Auto resolves to 0.0)
-        taffy_margin.resolve_or_zero(Some(parent_dimension))
+        // Note: Using no-op calc resolver since we don't have BaseDocument access here
+        // and margins typically don't use calc() in masonry contexts
+        taffy_margin.resolve_or_zero(Some(parent_dimension), |_, _| 0.0)
     } else {
         0.0
     }

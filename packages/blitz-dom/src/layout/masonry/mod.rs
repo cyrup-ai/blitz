@@ -3,6 +3,7 @@
 //! This module implements the "shortest track placement" algorithm
 //! for masonry layout as specified in the CSS Grid Level 3 specification.
 
+use taffy::{GridContainerStyle, GenericRepetition};
 use taffy::geometry::AbstractAxis;
 use taffy::prelude::NodeId;
 
@@ -45,42 +46,74 @@ pub fn apply_masonry_layout(
     // Phase 4: Collect and sort items by placement order ✨ WARNING 10
     let grid_items = item_collection::collect_and_sort_masonry_items(tree, node_id)?;
 
-    // Phase 5: Place items using pre-sized tracks
+    // Phase 5: Place items using pre-sized tracks with optional dense packing
     let mut placed_items = Vec::new();
 
     for item in grid_items {
-        // Find shortest track using tolerance-based algorithm
-        let shortest_track = masonry_state.find_shortest_track_with_tolerance();
+        let item_span = match masonry_axis {
+            AbstractAxis::Block => item.row_span,
+            AbstractAxis::Inline => item.column_span,
+        };
 
-        // Place item using Taffy-sized track information
+        // Determine placement track: try gap first if dense packing enabled
+        let placement_track = if config.dense_packing {
+            // Calculate item size for gap fitting
+            let item_size = item_collection::estimate_item_size_for_masonry(
+                tree,
+                item.node_id,
+                &inputs,
+            )?;
+            let item_masonry_size = match masonry_axis {
+                AbstractAxis::Block => item_size.height,
+                AbstractAxis::Inline => item_size.width,
+            };
+
+            // Calculate normal placement track size (for compatibility check)
+            let shortest_track = masonry_state.find_shortest_track_with_tolerance();
+            let normal_track_size: f32 = (shortest_track..(shortest_track + item_span))
+                .map(|i| track_sizes.get(i).copied().unwrap_or(0.0))
+                .sum();
+
+            // Detect compatible gaps
+            let gaps = gap_detection::detect_compatible_gaps(
+                &masonry_state,
+                &track_sizes,
+                item_span,
+                item_masonry_size,
+                normal_track_size,
+                config.item_tolerance,
+            );
+
+            // Use first (earliest) gap if available, otherwise use shortest track
+            gaps.first()
+                .map(|gap| gap.track_index)
+                .unwrap_or(shortest_track)
+        } else {
+            // Standard shortest track placement (no dense packing)
+            masonry_state.find_shortest_track_with_tolerance()
+        };
+
+        // Place item using determined track
         let placement = item_collection::place_item_in_taffy_sized_track(
             tree,
             &item,
-            shortest_track,
-            &track_sizes[shortest_track], // Use actual Taffy track size
+            placement_track,
+            &track_sizes[placement_track], // Use actual Taffy track size
             &masonry_state,
             masonry_axis,
             &inputs,
         )?;
 
         // Record placement in masonry state
-        let item_size_for_track = match masonry_axis {
-            AbstractAxis::Block => placement.1.masonry_axis_size,
-            AbstractAxis::Inline => placement.1.masonry_axis_size,
-        };
+        let item_size_for_track = placement.1.masonry_axis_size;
 
-        let span = match masonry_axis {
-            AbstractAxis::Block => item.row_span, // ✨ WARNING 10 field usage
-            AbstractAxis::Inline => item.column_span, // ✨ WARNING 10 field usage
-        };
-
-        masonry_state.place_item_with_tracking(shortest_track, item_size_for_track, span);
+        masonry_state.place_item_with_tracking(placement_track, item_size_for_track, item_span);
 
         #[cfg(feature = "tracing")]
         tracing::debug!(
             "Placed masonry item {} at track {} position {}",
             usize::from(item.node_id),
-            shortest_track,
+            placement_track,
             placement.1.masonry_axis_position
         );
 
@@ -129,14 +162,14 @@ pub fn apply_masonry_layout(
 }
 
 /// Check if tracks contain auto-fit repeat
-fn has_auto_fit_tracks<'a, I>(tracks: I) -> bool
+fn has_auto_fit_tracks<'a, I>(mut tracks: I) -> bool
 where
     I: Iterator<Item = taffy::GenericGridTemplateComponent<String, &'a taffy::GridTemplateRepetition<String>>>,
 {
     tracks.any(|component| match component {
         taffy::GenericGridTemplateComponent::Single(_) => false,
         taffy::GenericGridTemplateComponent::Repeat(repeat) => {
-            matches!(repeat.count(), taffy::RepetitionCount::AutoFit)
+            matches!(repeat.count, taffy::RepetitionCount::AutoFit)
         }
     })
 }
@@ -145,7 +178,7 @@ where
 fn collapse_empty_auto_fit_tracks(
     placed_items: &mut Vec<(NodeId, stylo_taffy::GridArea)>,
     track_sizes: &[f32],
-    masonry_axis: AbstractAxis,
+    _masonry_axis: AbstractAxis,
 ) {
     use std::collections::HashSet;
 

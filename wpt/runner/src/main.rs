@@ -19,7 +19,7 @@ use atomic_float::AtomicF64;
 use bitflags::bitflags;
 use blitz_dom::net::Resource;
 use blitz_traits::navigation::{DummyNavigationProvider, NavigationProvider};
-use blitz_traits::shell::{ColorScheme, Viewport};
+use blitz_traits::shell::{ColorScheme, DummyShellProvider, Viewport};
 use log::{error, info};
 use owo_colors::OwoColorize;
 use panic_backtrace::StashedPanicInfo;

@@ -8,7 +8,6 @@ use unicode_linebreak::{linebreaks, BreakOpportunity};
 use cosmyc_text::{Attrs, Buffer, FontSystem, Metrics, Shaping};
 
 use super::super::types::{BidiError, LineBreakInfo, ProcessedBidi};
-use crate::line_breaking::LineBreakAnalyzer;
 use crate::shaping::types::{ShapedRun, TextDirection};
 
 /// Line breaking processor for multi-line text
@@ -141,24 +140,23 @@ impl LineBreaker {
         font_system: &mut FontSystem,
         metrics: Metrics,
     ) -> Result<Vec<usize>, BidiError> {
-        // Use sophisticated LineBreakAnalyzer instead of simple greedy approach
-        let mut analyzer = LineBreakAnalyzer::new();
+        let _ = text; // Unused parameter, kept for API compatibility
         let mut optimal_breaks = Vec::new();
 
-        // Need to create ShapedRun from processed bidi for analysis
-        // For each visual run, find break opportunities
+        // For each visual run, find break opportunities directly from text
         for visual_run in &processed_bidi.visual_runs {
-            // Create temporary ShapedRun for this visual run
+            // Get Unicode line break opportunities directly from the text
+            // This avoids the glyph reconstruction issue
+            let break_positions: Vec<usize> = linebreaks(&visual_run.text)
+                .map(|(pos, _)| visual_run.start_index + pos)
+                .collect();
+
+            // Shape the text to get glyph metrics for width calculation
             let temp_run = self.create_shaped_run_from_visual(visual_run, font_system, metrics)?;
 
-            // Get break opportunities with priorities and penalties
-            let opportunities = analyzer
-                .find_break_opportunities(&temp_run)
-                .map_err(|e| BidiError::LineBreakingFailed(e.to_string()))?;
-
-            // Select breaks based on width constraints and penalties
-            let selected = self.select_breaks_by_penalty(
-                &opportunities,
+            // Select breaks based on width constraints
+            let selected = self.select_breaks_by_width(
+                &break_positions,
                 &temp_run,
                 visual_run.start_index,
             )?;
@@ -213,47 +211,47 @@ impl LineBreaker {
         Ok(width_penalty + char_penalty)
     }
 
-    /// Helper: Select breaks using penalty-based algorithm
-    fn select_breaks_by_penalty(
+    /// Helper: Select breaks using width-based algorithm
+    fn select_breaks_by_width(
         &self,
-        opportunities: &[crate::line_breaking::types::BreakOpportunity],
+        break_positions: &[usize],
         run: &ShapedRun,
         base_offset: usize,
     ) -> Result<Vec<usize>, BidiError> {
         let mut selected = Vec::new();
-        let mut current_width = 0.0;
-        let mut last_break = 0;
-        let mut last_valid_break: Option<(usize, usize)> = None; // (position, glyph_index)
+        let mut current_width: f32 = 0.0;
+        let mut last_break_glyph_idx = 0;
+        let mut last_valid_break: Option<(usize, usize)> = None; // (text_position, glyph_index)
 
-        for opp in opportunities {
-            let segment_width = self.calculate_segment_width(run, last_break, opp.position)?;
+        for &break_pos in break_positions {
+            // Calculate glyph index for this break position
+            let glyph_idx = break_pos - base_offset;
+            
+            // Calculate width of segment from last break to this position
+            let segment_width = self.calculate_segment_width(run, last_break_glyph_idx, glyph_idx)?;
 
             // Check if adding this segment would exceed max_width
             if current_width + segment_width > self.max_width {
                 // Need to break at the LAST valid position, not current
-                if let Some((break_pos, break_glyph_idx)) = last_valid_break {
-                    selected.push(base_offset + break_pos);
+                if let Some((valid_pos, valid_glyph_idx)) = last_valid_break {
+                    selected.push(valid_pos);
                     // Reset from the break position
-                    last_break = break_glyph_idx;
-                    // Recalculate width from break position to current opportunity
-                    current_width = self.calculate_segment_width(run, last_break, opp.position)?;
-                    last_valid_break = None;
+                    last_break_glyph_idx = valid_glyph_idx;
+                    // Recalculate width from break position to current position
+                    current_width = self.calculate_segment_width(run, last_break_glyph_idx, glyph_idx)?;
                 } else {
                     // No valid break found, force break at current position
-                    selected.push(base_offset + opp.position);
+                    selected.push(break_pos);
                     current_width = 0.0;
-                    last_break = opp.position;
-                    last_valid_break = None;
+                    last_break_glyph_idx = glyph_idx;
                 }
             } else {
                 // This segment fits, continue accumulating
                 current_width += segment_width;
             }
 
-            // Track this as a potential break point if priority is sufficient
-            if opp.priority >= crate::line_breaking::types::BreakPriority::Normal {
-                last_valid_break = Some((opp.position, opp.position));
-            }
+            // Track this as a potential break point for next iteration
+            last_valid_break = Some((break_pos, glyph_idx));
         }
 
         Ok(selected)

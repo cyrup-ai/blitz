@@ -132,16 +132,32 @@ impl GridLayoutCoordinator {
         _row_span: usize,
         _col_span: usize,
     ) -> Result<(), GridPreprocessingError> {
-        // For now, implement row flow (default grid-auto-flow: row)
-        // Cursor moves to the cell after the placed item's column end
+        use super::placement_types::FlowDirection;
 
-        // Move to column after the placed item
-        placement_state.cursor_position.column = placement.grid_area.column_end;
+        // Advance cursor based on grid-auto-flow property
+        match placement_state.flow_direction {
+            FlowDirection::Row => {
+                // Row flow: cursor moves column-by-column, then to next row
+                // Move to column after the placed item
+                placement_state.cursor_position.column = placement.grid_area.column_end;
 
-        // If past grid width, move to next row and column 0
-        if placement_state.cursor_position.column >= placement_state.track_occupancy.grid_size.column {
-            placement_state.cursor_position.column = 0;
-            placement_state.cursor_position.row += 1;
+                // If past grid width, move to next row and column 0
+                if placement_state.cursor_position.column >= placement_state.track_occupancy.grid_size.column {
+                    placement_state.cursor_position.column = 0;
+                    placement_state.cursor_position.row += 1;
+                }
+            }
+            FlowDirection::Column => {
+                // Column flow: cursor moves row-by-row, then to next column
+                // Move to row after the placed item
+                placement_state.cursor_position.row = placement.grid_area.row_end;
+
+                // If past grid height, move to next column and row 0
+                if placement_state.cursor_position.row >= placement_state.track_occupancy.grid_size.row {
+                    placement_state.cursor_position.row = 0;
+                    placement_state.cursor_position.column += 1;
+                }
+            }
         }
 
         Ok(())
@@ -216,26 +232,49 @@ impl GridLayoutCoordinator {
         row_span: usize,
         col_span: usize,
     ) -> Result<Option<GridPosition>, GridPreprocessingError> {
+        use super::placement_types::FlowDirection;
+
         let grid_size = &state.track_occupancy.grid_size;
 
         // For dense mode: Always search from (0, 0) to fill gaps
-        // Respect flow direction even in dense mode
-        // For row flow: iterate columns within rows
-        // For column flow: iterate rows within columns
+        // Respect flow direction even in dense mode to maintain consistent search order
+        match state.flow_direction {
+            FlowDirection::Row => {
+                // Row flow: iterate columns within rows
+                for row in 0..grid_size.row {
+                    for col in 0..grid_size.column {
+                        let row_end = row + row_span as i32;
+                        let col_end = col + col_span as i32;
 
-        for row in 0..grid_size.row {
-            for col in 0..grid_size.column {
-                let row_end = row + row_span as i32;
-                let col_end = col + col_span as i32;
+                        // Check bounds
+                        if row_end > grid_size.row || col_end > grid_size.column {
+                            continue;
+                        }
 
-                // Check bounds
-                if row_end > grid_size.row || col_end > grid_size.column {
-                    continue;
+                        // Check if area is available
+                        if state.track_occupancy.is_area_available(row, row_end, col, col_end) {
+                            return Ok(Some(GridPosition { row, column: col }));
+                        }
+                    }
                 }
+            }
+            FlowDirection::Column => {
+                // Column flow: iterate rows within columns
+                for col in 0..grid_size.column {
+                    for row in 0..grid_size.row {
+                        let row_end = row + row_span as i32;
+                        let col_end = col + col_span as i32;
 
-                // Check if area is available
-                if state.track_occupancy.is_area_available(row, row_end, col, col_end) {
-                    return Ok(Some(GridPosition { row, column: col }));
+                        // Check bounds
+                        if row_end > grid_size.row || col_end > grid_size.column {
+                            continue;
+                        }
+
+                        // Check if area is available
+                        if state.track_occupancy.is_area_available(row, row_end, col, col_end) {
+                            return Ok(Some(GridPosition { row, column: col }));
+                        }
+                    }
                 }
             }
         }
@@ -303,11 +342,27 @@ impl GridLayoutCoordinator {
         mut position: GridPosition,
         placement_state: &AutoPlacementState,
     ) -> Result<GridPosition, GridPreprocessingError> {
-        position.column += 1;
-        if position.column >= placement_state.track_occupancy.grid_size.column {
-            position.column = 0;
-            position.row += 1;
+        use super::placement_types::FlowDirection;
+
+        match placement_state.flow_direction {
+            FlowDirection::Row => {
+                // Row flow: advance column, then row
+                position.column += 1;
+                if position.column >= placement_state.track_occupancy.grid_size.column {
+                    position.column = 0;
+                    position.row += 1;
+                }
+            }
+            FlowDirection::Column => {
+                // Column flow: advance row, then column
+                position.row += 1;
+                if position.row >= placement_state.track_occupancy.grid_size.row {
+                    position.row = 0;
+                    position.column += 1;
+                }
+            }
         }
+
         Ok(position)
     }
 
@@ -334,14 +389,32 @@ impl GridLayoutCoordinator {
         placement_state: &mut AutoPlacementState,
         placement: &ItemPlacement,
     ) -> Result<(), GridPreprocessingError> {
-        // Advance cursor based on placement
-        placement_state.cursor_position.column = placement.grid_area.column_end;
-        if placement_state.cursor_position.column
-            >= placement_state.track_occupancy.grid_size.column
-        {
-            placement_state.cursor_position.column = 0;
-            placement_state.cursor_position.row += 1;
+        use super::placement_types::FlowDirection;
+
+        // Advance cursor based on placement and flow direction
+        match placement_state.flow_direction {
+            FlowDirection::Row => {
+                // Row flow: advance to column after placement
+                placement_state.cursor_position.column = placement.grid_area.column_end;
+                if placement_state.cursor_position.column
+                    >= placement_state.track_occupancy.grid_size.column
+                {
+                    placement_state.cursor_position.column = 0;
+                    placement_state.cursor_position.row += 1;
+                }
+            }
+            FlowDirection::Column => {
+                // Column flow: advance to row after placement
+                placement_state.cursor_position.row = placement.grid_area.row_end;
+                if placement_state.cursor_position.row
+                    >= placement_state.track_occupancy.grid_size.row
+                {
+                    placement_state.cursor_position.row = 0;
+                    placement_state.cursor_position.column += 1;
+                }
+            }
         }
+
         Ok(())
     }
 

@@ -4,6 +4,21 @@ use std::collections::HashMap;
 
 use taffy::NodeId;
 
+/// Flow direction for grid auto-placement algorithm
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FlowDirection {
+    /// Row flow (default): cursor moves column-by-column, then to next row
+    Row,
+    /// Column flow: cursor moves row-by-row, then to next column
+    Column,
+}
+
+impl Default for FlowDirection {
+    fn default() -> Self {
+        FlowDirection::Row // CSS Grid default
+    }
+}
+
 /// Auto-placement state management for CSS Grid algorithm
 #[derive(Debug, Clone)]
 pub struct AutoPlacementState {
@@ -21,6 +36,9 @@ pub struct AutoPlacementState {
 
     /// Track occupancy for conflict detection
     pub track_occupancy: TrackOccupancyMap,
+
+    /// Flow direction for auto-placement
+    pub flow_direction: FlowDirection,
 }
 
 /// Grid position for placement coordination

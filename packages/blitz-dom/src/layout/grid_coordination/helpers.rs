@@ -367,9 +367,9 @@ impl GridLayoutCoordinator {
     }
 
     /// Resolve grid line placement to concrete positions
-    fn resolve_grid_line_placement(
+    fn resolve_grid_line_placement<CustomIdent: taffy::CheapCloneStr>(
         &self,
-        line: taffy::Line<taffy::GridPlacement>,
+        line: taffy::Line<taffy::GridPlacement<CustomIdent>>,
         is_row: bool,
         state: &AutoPlacementState,
     ) -> Result<(i32, i32), GridPreprocessingError> {
@@ -385,16 +385,32 @@ impl GridLayoutCoordinator {
         let start = match line.start {
             GridPlacement::Auto => 0, // Will be resolved by auto-placement
             GridPlacement::Line(n) => {
+                // Extract i16 value from GridLine and convert to i32
+                let line_value = n.as_i16() as i32;
                 // Negative lines count from end (1-indexed in CSS)
-                if n < 0 {
-                    (grid_size + n as i32).max(0)
+                if line_value < 0 {
+                    (grid_size + line_value).max(0)
                 } else {
                     // Convert 1-indexed to 0-indexed
-                    (n as i32 - 1).max(0)
+                    (line_value - 1).max(0)
                 }
             }
             GridPlacement::Span(_) => {
                 // Span on start will be resolved after end
+                0
+            }
+            GridPlacement::NamedLine(_, offset) => {
+                // Named lines should be resolved before this point
+                // For now, treat offset as absolute line position
+                let line_value = offset as i32;
+                if line_value < 0 {
+                    (grid_size + line_value).max(0)
+                } else {
+                    (line_value - 1).max(0)
+                }
+            }
+            GridPlacement::NamedSpan(_, _) => {
+                // Named spans will be resolved after end
                 0
             }
         };
@@ -409,15 +425,29 @@ impl GridLayoutCoordinator {
                 }
             }
             GridPlacement::Line(n) => {
-                if n < 0 {
-                    (grid_size + n as i32).max(start)
+                let line_value = n.as_i16() as i32;
+                if line_value < 0 {
+                    (grid_size + line_value).max(start)
                 } else {
-                    (n as i32 - 1).max(start)
+                    (line_value - 1).max(start)
                 }
             }
             GridPlacement::Span(n) => {
                 // Span n tracks from start
                 start + n as i32
+            }
+            GridPlacement::NamedLine(_, offset) => {
+                // Named lines should be resolved before this point
+                let line_value = offset as i32;
+                if line_value < 0 {
+                    (grid_size + line_value).max(start)
+                } else {
+                    (line_value - 1).max(start)
+                }
+            }
+            GridPlacement::NamedSpan(_, span_count) => {
+                // Named span: span n tracks from start
+                start + span_count as i32
             }
         };
 

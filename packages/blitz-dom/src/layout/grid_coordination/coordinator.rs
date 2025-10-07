@@ -71,10 +71,14 @@ impl GridLayoutCoordinator {
     }
 
     /// Coordinate auto-placement (Pass 3)
-    pub fn coordinate_auto_placement(
+    pub fn coordinate_auto_placement<Tree>(
         &mut self,
         subgrid_id: NodeId,
-    ) -> Result<Vec<ItemPlacement>, GridPreprocessingError> {
+        tree: &Tree,
+    ) -> Result<Vec<ItemPlacement>, GridPreprocessingError>
+    where
+        Tree: taffy::LayoutGridContainer + taffy::TraversePartialTree + std::any::Any,
+    {
         // 1. Initialize placement state
         let mut placement_state = AutoPlacementState {
             cursor_position: GridPosition::default(),
@@ -82,21 +86,22 @@ impl GridLayoutCoordinator {
             explicit_placements: std::collections::HashMap::new(),
             dense_packing_state: None,
             track_occupancy: TrackOccupancyMap::default(),
+            flow_direction: FlowDirection::default(), // Default to Row flow
         };
 
         // 2. Process items in CSS order
-        let ordered_items = self.get_items_in_css_order(subgrid_id)?;
+        let ordered_items = self.get_items_in_css_order(subgrid_id, tree)?;
         placement_state.ordered_items = ordered_items;
 
         // 3. Handle explicit placements
         let explicit_placements =
-            self.process_explicit_placements(subgrid_id, &mut placement_state)?;
+            self.process_explicit_placements(subgrid_id, &mut placement_state, tree)?;
 
         // 4. Auto-place using placement cursor
-        let auto_placements = self.auto_place_items(subgrid_id, &mut placement_state)?;
+        let auto_placements = self.auto_place_items(subgrid_id, &mut placement_state, tree)?;
 
         // 5. Dense packing pass (if enabled)
-        let dense_placements = self.dense_packing_pass(subgrid_id, &mut placement_state)?;
+        let dense_placements = self.dense_packing_pass(subgrid_id, &mut placement_state, tree)?;
 
         // Combine all placements
         let mut all_placements = explicit_placements;
