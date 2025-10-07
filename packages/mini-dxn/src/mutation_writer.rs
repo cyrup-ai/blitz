@@ -299,7 +299,8 @@ fn create_template_node(docm: &mut DocumentMutator<'_>, node: &TemplateNode) -> 
         } => {
             let name = qual_name(tag, *namespace);
             let attrs = attrs.iter().filter_map(map_template_attr).collect();
-            let node_id = docm.create_element(name, attrs);
+            let quirks_mode = docm.doc.quirks_mode();
+            let node_id = docm.create_element(name, attrs, quirks_mode);
 
             let child_ids: Vec<NodeId> = children
                 .iter()

@@ -54,15 +54,16 @@ impl DioxusDocument {
 
         // Create the html element
         let mut mutr = doc.mutate();
-        let html_element_id = mutr.create_element(qual_name("html", None), vec![]);
+        let quirks_mode = mutr.doc.quirks_mode();
+        let html_element_id = mutr.create_element(qual_name("html", None), vec![], quirks_mode);
         mutr.append_children(mutr.doc.root_node().id, &[html_element_id]);
 
         // Create the head element
-        let head_element_id = mutr.create_element(qual_name("head", None), vec![]);
+        let head_element_id = mutr.create_element(qual_name("head", None), vec![], quirks_mode);
         mutr.append_children(html_element_id, &[head_element_id]);
 
         // Create the body element
-        let body_element_id = mutr.create_element(qual_name("body", None), vec![]);
+        let body_element_id = mutr.create_element(qual_name("body", None), vec![], quirks_mode);
         mutr.append_children(html_element_id, &[body_element_id]);
 
         // Create another virtual element to hold the root <div id="main"></div> under the html element
@@ -70,7 +71,7 @@ impl DioxusDocument {
             name: qual_name("id", None),
             value: "main".to_string(),
         };
-        let main_element_id = mutr.create_element(qual_name("main", None), vec![main_attr]);
+        let main_element_id = mutr.create_element(qual_name("main", None), vec![main_attr], quirks_mode);
         mutr.append_children(body_element_id, &[main_element_id]);
 
         drop(mutr);

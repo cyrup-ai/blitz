@@ -183,7 +183,18 @@ impl<'b> TreeSink for DocumentHtmlParser<'b> {
         _flags: ElementFlags,
     ) -> Self::Handle {
         let attrs = attrs.into_iter().map(html5ever_to_blitz_attr).collect();
-        self.mutr().create_element(convert_qualname(name), attrs)
+        
+        // Get current quirks mode from parser sink (updated by html5ever during parsing)
+        let quirks_mode = self.quirks_mode.get();
+        
+        // Convert html5ever's QuirksMode to blitz_dom's QuirksMode (from selectors)
+        let blitz_quirks_mode = match quirks_mode {
+            QuirksMode::NoQuirks => blitz_dom::QuirksMode::NoQuirks,
+            QuirksMode::LimitedQuirks => blitz_dom::QuirksMode::LimitedQuirks,
+            QuirksMode::Quirks => blitz_dom::QuirksMode::Quirks,
+        };
+        
+        self.mutr().create_element(convert_qualname(name), attrs, blitz_quirks_mode)
     }
 
     fn create_comment(&self, _text: StrTendril) -> Self::Handle {

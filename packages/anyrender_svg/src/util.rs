@@ -48,7 +48,7 @@ pub(crate) fn convert_stroke_to_peniko(stroke: &kurbo::Stroke) -> peniko::kurbo:
 
 pub(crate) fn convert_bezpath_to_peniko(path: &kurbo::BezPath) -> peniko::kurbo::BezPath {
     let mut peniko_path = peniko::kurbo::BezPath::new();
-    path.elements().into_iter().for_each(|element| {
+    path.elements().iter().for_each(|element| {
         use kurbo::PathEl;
         match element {
             PathEl::MoveTo(p) => peniko_path.move_to((p.x, p.y)),

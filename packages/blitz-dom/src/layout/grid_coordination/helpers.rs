@@ -488,18 +488,29 @@ impl GridLayoutCoordinator {
                 "No parent grid found"
             ))?;
         
-        // Access parent's intrinsic sizing state from subgrid module
-        // Initialize if not present
+        // Initialize parent state if not present (using CORRECT structure)
         if !self.intrinsic_sizing_states.contains_key(&parent_grid_id) {
-            self.intrinsic_sizing_states.insert(parent_grid_id, IntrinsicSizingState {
-                content_contributions: std::collections::HashMap::new(),
-                track_size_requirements: Vec::new(),
-                sizing_pass_state: SizingPassState::default(),
-            });
+            self.intrinsic_sizing_states.insert(parent_grid_id, 
+                super::super::subgrid::layout_states::IntrinsicSizingState {
+                    row_sizing: super::super::subgrid::layout_states::AxisSizingState {
+                        track_sizes: Vec::new(),
+                        sizing_constraints: Vec::new(),
+                        flexible_tracks: Vec::new(),
+                    },
+                    column_sizing: super::super::subgrid::layout_states::AxisSizingState {
+                        track_sizes: Vec::new(),
+                        sizing_constraints: Vec::new(),
+                        flexible_tracks: Vec::new(),
+                    },
+                    cross_axis_deps: Vec::new(),
+                    coordination_pass: 0,
+                    previous_row_sizes: None,
+                    previous_column_sizes: None,
+                }
+            );
         }
         
         for contribution in contributions {
-            // Get mutable reference to parent's sizing state
             let parent_state = self.intrinsic_sizing_states.get_mut(&parent_grid_id)
                 .ok_or_else(|| GridPreprocessingError::preprocessing_failed(
                     "update_parent_tracks",
@@ -507,25 +518,23 @@ impl GridLayoutCoordinator {
                     "Parent sizing state not found"
                 ))?;
             
-            // Ensure track size requirement exists for this contribution
-            while parent_state.track_size_requirements.len() <= contribution.parent_track_index {
-                parent_state.track_size_requirements.push(TrackSizeRequirement {
-                    track_index: parent_state.track_size_requirements.len(),
-                    min_size: 0.0,
-                    max_size: 0.0,
-                    flex_factor: 0.0,
-                    axis: contribution.axis,
-                });
+            // Select correct axis state
+            let axis_state = match contribution.axis {
+                super::super::grid_context::GridAxis::Row => &mut parent_state.row_sizing,
+                super::super::grid_context::GridAxis::Column => &mut parent_state.column_sizing,
+            };
+            
+            // Ensure track exists
+            while axis_state.track_sizes.len() <= contribution.parent_track_index {
+                axis_state.track_sizes.push(0.0);
             }
             
             // Update track size if contribution is larger
-            let requirement = &mut parent_state.track_size_requirements[contribution.parent_track_index];
-            let current_size = requirement.min_size;
+            let current_size = axis_state.track_sizes[contribution.parent_track_index];
             let new_size = current_size.max(contribution.min_size);
             
             if (new_size - current_size).abs() > 0.1 {
-                requirement.min_size = new_size;
-                requirement.max_size = requirement.max_size.max(contribution.max_size);
+                axis_state.track_sizes[contribution.parent_track_index] = new_size;
                 any_changes = true;
             }
         }

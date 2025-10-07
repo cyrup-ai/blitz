@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use taffy::NodeId;
 
 use super::super::grid_context::GridAxis;
+use super::super::subgrid::layout_states::IntrinsicSizingState as SubgridIntrinsicSizingState;
 
 /// Multi-pass layout coordination system for CSS Grid
 #[derive(Debug, Clone)]
@@ -19,7 +20,7 @@ pub struct GridLayoutCoordinator {
     pub auto_placement_states: HashMap<NodeId, AutoPlacementState>,
 
     /// Intrinsic sizing coordination
-    pub intrinsic_sizing_states: HashMap<NodeId, IntrinsicSizingState>,
+    pub intrinsic_sizing_states: HashMap<NodeId, SubgridIntrinsicSizingState>,
 
     /// CSS Grid Level 3 masonry support
     pub masonry_states: HashMap<NodeId, MasonryLayoutState>,

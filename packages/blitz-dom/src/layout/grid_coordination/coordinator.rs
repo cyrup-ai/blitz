@@ -6,6 +6,7 @@ use crate::BaseDocument;
 use super::super::grid_context::ParentGridContext;
 use super::super::grid_errors::GridPreprocessingError;
 use super::super::intrinsic_sizing::calculate_item_intrinsic_size_for_masonry;
+use super::super::subgrid::layout_states::IntrinsicSizingState;
 use super::placement_types::*;
 use super::types::*;
 
@@ -156,9 +157,20 @@ impl GridLayoutCoordinator {
         // Initialize intrinsic sizing state if not present
         if !self.intrinsic_sizing_states.contains_key(&subgrid_id) {
             self.intrinsic_sizing_states.insert(subgrid_id, IntrinsicSizingState {
-                content_contributions: std::collections::HashMap::new(),
-                track_size_requirements: Vec::new(),
-                sizing_pass_state: SizingPassState::default(),
+                row_sizing: super::super::subgrid::layout_states::AxisSizingState {
+                    track_sizes: Vec::new(),
+                    sizing_constraints: Vec::new(),
+                    flexible_tracks: Vec::new(),
+                },
+                column_sizing: super::super::subgrid::layout_states::AxisSizingState {
+                    track_sizes: Vec::new(),
+                    sizing_constraints: Vec::new(),
+                    flexible_tracks: Vec::new(),
+                },
+                cross_axis_deps: Vec::new(),
+                coordination_pass: 0,
+                previous_row_sizes: None,
+                previous_column_sizes: None,
             });
         }
         
@@ -171,6 +183,13 @@ impl GridLayoutCoordinator {
             
             // PASS C: Collect contributions to parent
             let track_contributions = self.collect_subgrid_size_contributions(tree, subgrid_id, inputs)?;
+            
+            // Before Pass D (updating parent tracks), save current sizes for convergence check
+            if let Some(state) = self.intrinsic_sizing_states.get_mut(&subgrid_id) {
+                state.previous_row_sizes = Some(state.row_sizing.track_sizes.clone());
+                state.previous_column_sizes = Some(state.column_sizing.track_sizes.clone());
+                state.coordination_pass = pass;
+            }
             
             // PASS D: Update parent track sizing
             let track_changes = self.update_parent_track_sizing(tree, subgrid_id, track_contributions)?;
@@ -193,7 +212,7 @@ impl GridLayoutCoordinator {
     fn check_size_convergence(
         &self,
         subgrid_id: NodeId,
-        _tolerance: f32,
+        tolerance: f32,
     ) -> Result<bool, GridPreprocessingError> {
         let state = self.intrinsic_sizing_states.get(&subgrid_id)
             .ok_or_else(|| GridPreprocessingError::preprocessing_failed(
@@ -202,15 +221,21 @@ impl GridLayoutCoordinator {
                 "Intrinsic sizing state not found"
             ))?;
         
-        // For now, we check if we have any track size requirements
-        // In full implementation, this would compare with previous_sizes
-        let has_requirements = !state.track_size_requirements.is_empty();
+        // Check if we have previous sizes to compare
+        let row_converged = match &state.previous_row_sizes {
+            Some(prev) => Self::track_sizes_converged(prev, &state.row_sizing.track_sizes, tolerance),
+            None => false, // First pass, no previous data
+        };
         
-        Ok(has_requirements)
+        let column_converged = match &state.previous_column_sizes {
+            Some(prev) => Self::track_sizes_converged(prev, &state.column_sizing.track_sizes, tolerance),
+            None => false,
+        };
+        
+        Ok(row_converged && column_converged)
     }
     
     /// Helper: Check if track sizes converged
-    #[allow(dead_code)]
     fn track_sizes_converged(prev: &[f32], current: &[f32], tolerance: f32) -> bool {
         if prev.len() != current.len() {
             return false;
@@ -305,12 +330,32 @@ impl GridLayoutCoordinator {
     /// Map subgrid track index to parent track index
     fn map_subgrid_track_to_parent(
         &self,
-        _subgrid_id: NodeId,
+        subgrid_id: NodeId,
         track_index: usize,
-        _axis: super::super::grid_context::GridAxis,
+        axis: super::super::grid_context::GridAxis,
     ) -> Result<usize, GridPreprocessingError> {
-        // For now, direct mapping - will be enhanced with proper coordinate transformation
-        Ok(track_index)
+        // Get subgrid state to access coordinate transform
+        let subgrid_state = self.subgrid_states.get(&subgrid_id)
+            .ok_or_else(|| GridPreprocessingError::preprocessing_failed(
+                "map_track_to_parent",
+                subgrid_id.into(),
+                "Subgrid state not found"
+            ))?;
+        
+        // Apply coordinate transformation based on axis
+        let parent_track_index = match axis {
+            super::super::grid_context::GridAxis::Row => {
+                // For SubgridTrackInheritance, access coordinate_transform
+                // If inherited_tracks has coordinate info, use it
+                // For now, direct mapping until SubgridTrackInheritance is properly integrated
+                track_index
+            }
+            super::super::grid_context::GridAxis::Column => {
+                track_index
+            }
+        };
+        
+        Ok(parent_track_index)
     }
 
     /// Enhanced intrinsic sizing with content measurement
@@ -373,11 +418,34 @@ impl GridLayoutCoordinator {
     /// Determine which tracks an item affects
     fn determine_affected_tracks(
         &self,
-        _item_id: NodeId,
-        _tree: &BaseDocument,
+        item_id: NodeId,
+        tree: &BaseDocument,
     ) -> Result<Vec<usize>, GridPreprocessingError> {
-        // For now, return first track - will be enhanced with proper grid placement analysis
-        Ok(vec![0])
+        // In a full implementation, this would:
+        // 1. Get item's grid-row-start, grid-row-end (or grid-column for column axis)
+        // 2. Resolve GridLine positions to track indices
+        // 3. Return all tracks from start to end
+        
+        // For now, analyze span - if item has explicit placement, use it
+        // Otherwise assume it spans track 0
+        
+        // Get grid placement from style (would need access to Taffy style)
+        // This is a placeholder that handles the common case
+        let affected = vec![0]; // Start with track 0
+        
+        // When style access is available:
+        // let style = tree.get_style(item_id);
+        // match (style.grid_row.start, style.grid_row.end) {
+        //     (GridLine::Line(start), GridLine::Line(end)) => {
+        //         (start.max(0) as usize..end.max(0) as usize).collect()
+        //     }
+        //     (GridLine::Line(start), GridLine::Span(span)) => {
+        //         (start.max(0) as usize..(start + span as i16).max(0) as usize).collect()
+        //     }
+        //     _ => vec![0]  // Auto-placed items
+        // }
+        
+        Ok(affected)
     }
 
     /// Compute min-content size using actual measurement
@@ -386,13 +454,16 @@ impl GridLayoutCoordinator {
         // Use CSS min-content calculation instead of hardcoded value
         // This integrates with the intrinsic sizing state tracking system
         if let Some(intrinsic_state) = self.intrinsic_sizing_states.get(&node_id) {
-            // Use minimum content contribution from measured content
-            let min_size = intrinsic_state.content_contributions
-                .values()
-                .map(|contrib| contrib.min_content_size)
+            // Use minimum track size from row and column sizing
+            let row_min = intrinsic_state.row_sizing.track_sizes.iter()
                 .min_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+                .copied()
                 .unwrap_or(0.0);
-            Ok(min_size)
+            let col_min = intrinsic_state.column_sizing.track_sizes.iter()
+                .min_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+                .copied()
+                .unwrap_or(0.0);
+            Ok(row_min.min(col_min))
         } else {
             // Fallback to CSS spec default for min-content when no content
             Ok(0.0)
@@ -405,13 +476,16 @@ impl GridLayoutCoordinator {
         // Use CSS max-content calculation instead of hardcoded value
         // This integrates with the intrinsic sizing state tracking system
         if let Some(intrinsic_state) = self.intrinsic_sizing_states.get(&node_id) {
-            // Use maximum content contribution from measured content
-            let max_size = intrinsic_state.content_contributions
-                .values()
-                .map(|contrib| contrib.max_content_size)
+            // Use maximum track size from row and column sizing
+            let row_max = intrinsic_state.row_sizing.track_sizes.iter()
                 .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+                .copied()
                 .unwrap_or(0.0);
-            Ok(max_size)
+            let col_max = intrinsic_state.column_sizing.track_sizes.iter()
+                .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+                .copied()
+                .unwrap_or(0.0);
+            Ok(row_max.max(col_max))
         } else {
             // Fallback to CSS spec default for max-content when no content
             Ok(0.0)

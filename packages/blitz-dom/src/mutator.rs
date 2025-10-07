@@ -5,6 +5,7 @@ use std::ops::{Deref, DerefMut};
 use blitz_text::Edit;
 use blitz_traits::net::Request;
 use blitz_traits::shell::Viewport;
+use selectors::matching::QuirksMode;
 use style::invalidation::element::restyle_hints::RestyleHint;
 use style::stylesheets::OriginSet;
 
@@ -121,9 +122,9 @@ impl DocumentMutator<'_> {
         self.doc.create_text_node(text)
     }
 
-    pub fn create_element(&mut self, name: QualName, attrs: Vec<Attribute>) -> usize {
+    pub fn create_element(&mut self, name: QualName, attrs: Vec<Attribute>, quirks_mode: QuirksMode) -> usize {
         let mut data = ElementData::new(name, attrs);
-        data.flush_style_attribute(self.doc.guard(), &self.doc.url.url_extra_data(), self.doc.quirks_mode());
+        data.flush_style_attribute(self.doc.guard(), &self.doc.url.url_extra_data(), quirks_mode);
 
         let id = self.doc.create_node(NodeData::Element(data));
         let node = match self.doc.get_node(id) {
