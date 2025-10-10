@@ -26,7 +26,7 @@ impl ShapingCacheKey {
 }
 
 /// Shaped text result containing glyph runs
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ShapedText {
     pub runs: Vec<u8>, // Serialized glyph runs
     pub total_advance: f32,

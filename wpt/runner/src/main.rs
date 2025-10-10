@@ -356,7 +356,12 @@ impl TestResult {
 
 fn main() {
     env_logger::init();
-    std::panic::set_hook(Box::new(panic_backtrace::stash_panic_handler));
+    // std::panic::set_hook(Box::new(panic_backtrace::stash_panic_handler));
+
+    // Create tokio runtime for goldylox background tasks
+    // The _guard keeps the runtime context active for the entire main function
+    let rt = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
+    let _guard = rt.enter();
 
     let wpt_dir = path::absolute(env::var("WPT_DIR").expect("WPT_DIR is not set")).unwrap();
     info!("WPT_DIR: {}", wpt_dir.display());
@@ -399,6 +404,15 @@ fn main() {
     let start_timestamp = unix_timestamp();
 
     let num = AtomicU32::new(0);
+
+    // Pre-initialize text system singleton in main thread before parallel execution
+    // This prevents race conditions and stack overflow from multiple simultaneous initializations
+    {
+        use anyrender::ImageRenderer;
+        let init_renderer = VelloImageRenderer::new(WIDTH, HEIGHT);
+        println!("✅ Text system singleton pre-initialized in main thread");
+        drop(init_renderer);
+    }
 
     let thread_state: ThreadLocal<RefCell<ThreadCtx>> = ThreadLocal::new();
 

@@ -16,7 +16,7 @@ pub struct ShapingCacheKey {
 }
 
 /// Complete shaped text with all runs and metrics
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ShapedText {
     pub runs: Vec<ShapedRun>,
     pub total_width: f32,
@@ -28,7 +28,7 @@ pub struct ShapedText {
 }
 
 /// Single shaped run with consistent script and direction
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ShapedRun {
     pub glyphs: Vec<ShapedGlyph>,
     pub script: Script,
@@ -45,7 +45,7 @@ pub struct ShapedRun {
 }
 
 /// Shaped glyph with positioning and metadata
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ShapedGlyph {
     pub glyph_id: u16,
     pub cluster: u32,

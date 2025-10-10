@@ -4,7 +4,7 @@
 //! that eliminates initialization overhead during render loops and prevents multiple
 //! initialization attempts that cause cache failures.
 
-use std::sync::OnceLock;
+use tokio::sync::OnceCell;
 use blitz_text::{UnifiedTextSystem, text_system::config::TextSystemError, cosmyc};
 use wgpu::{Device, Queue, TextureFormat, MultisampleState, DepthStencilState};
 
@@ -44,20 +44,20 @@ impl From<TextSystemError> for TextSystemSingletonError {
 pub struct TextSystemSingleton;
 
 impl TextSystemSingleton {
-    /// Global singleton instance using lock-free initialization
+    /// Global singleton instance using async-aware initialization
     /// 
-    /// OnceLock ensures initialization happens exactly once across all threads
-    /// without requiring explicit synchronization or allocation after init.
-    fn instance() -> &'static OnceLock<UnifiedTextSystem> {
-        static INSTANCE: OnceLock<UnifiedTextSystem> = OnceLock::new();
+    /// OnceCell ensures initialization happens exactly once across all threads
+    /// atomically, preventing race conditions during async initialization.
+    fn instance() -> &'static OnceCell<UnifiedTextSystem> {
+        static INSTANCE: OnceCell<UnifiedTextSystem> = OnceCell::const_new();
         &INSTANCE
     }
 
     /// Initialize the text system singleton with GPU context
     /// 
-    /// This method is idempotent - calling it multiple times is safe and will
-    /// return success if already initialized. Uses zero-allocation fast path
-    /// for subsequent calls.
+    /// This method is idempotent and race-free - calling it multiple times is safe.
+    /// Only ONE thread will ever execute the initialization closure, eliminating
+    /// the race condition that caused multiple goldylox cache initializations.
     /// 
     /// # Arguments
     /// * `device` - WGPU device for GPU operations
@@ -79,31 +79,20 @@ impl TextSystemSingleton {
     ) -> Result<(), TextSystemSingletonError> {
         let instance = Self::instance();
         
-        // Fast path: already initialized (zero allocation)
-        if instance.get().is_some() {
-            println!("🔄 TextSystemSingleton::initialize_once - already initialized, skipping");
-            return Ok(());
-        }
+        // Atomic async initialization - only ONE thread executes the closure
+        instance.get_or_try_init(|| async {
+            println!("🚀 TextSystemSingleton::initialize_once - initializing for first time");
+            UnifiedTextSystem::new(
+                device,
+                queue,
+                format,
+                multisample,
+                depth_stencil,
+            ).await.map_err(TextSystemSingletonError::from)
+        }).await?;
         
-        println!("🚀 TextSystemSingleton::initialize_once - initializing for first time");
-
-        // Slow path: initialize (happens exactly once)
-        let text_system = UnifiedTextSystem::new(
-            device,
-            queue,
-            format,
-            multisample,
-            depth_stencil,
-        ).await.map_err(TextSystemSingletonError::from)?;
-
-        // Attempt to set the singleton
-        match instance.set(text_system) {
-            Ok(()) => Ok(()),
-            Err(_) => {
-                // Another thread initialized it first - this is fine
-                Ok(())
-            }
-        }
+        println!("✅ TextSystemSingleton initialized successfully");
+        Ok(())
     }
 
     /// Check if the text system singleton is initialized

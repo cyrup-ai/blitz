@@ -6224,6 +6224,7 @@ dependencies = [
  "taffy",
  "terminal-link",
  "thread_local",
+ "tokio",
  "url",
  "wptreport",
 ]

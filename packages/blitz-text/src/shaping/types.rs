@@ -23,7 +23,7 @@ pub struct ShapingCacheKey {
 }
 
 /// Complete shaped text with all runs and metrics
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ShapedText {
     pub runs: Vec<ShapedRun>,
     pub total_width: f32,
@@ -50,7 +50,7 @@ impl Default for ShapedText {
 }
 
 /// Single shaped run with consistent script and direction
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ShapedRun {
     pub glyphs: Vec<ShapedGlyph>,
     #[serde(with = "script_serde")]
@@ -69,7 +69,7 @@ pub struct ShapedRun {
 }
 
 /// Shaped glyph with positioning and metadata
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ShapedGlyph {
     pub glyph_id: u16,
     pub cluster: u32,
@@ -93,7 +93,7 @@ pub enum TextDirection {
 
 bitflags::bitflags! {
     /// Glyph flags for advanced text processing
-    #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+    #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
     pub struct GlyphFlags: u32 {
         const UNSAFE_TO_BREAK = 0x00000001;
         const UNSAFE_TO_CONCAT = 0x00000002;

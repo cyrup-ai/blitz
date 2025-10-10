@@ -7,7 +7,7 @@ use wgpu::{
 };
 
 use crate::wgpu_context::WGPUContext;
-use crate::{DEFAULT_THREADS, VelloScenePainter};
+use crate::{DEFAULT_THREADS, VelloScenePainter, GlyphonState};
 
 pub struct VelloImageRenderer {
     size: Extent3d,
@@ -64,6 +64,18 @@ impl ImageRenderer for VelloImageRenderer {
             .initialize_resolver(&device, &queue, TextureFormat::Rgba8Unorm)
             .expect("Failed to initialize vello resolver for text rendering");
 
+        // Initialize text system singleton with GPU context
+        // This enables text rendering in the image renderer (e.g., for WPT tests)
+        pollster::block_on(
+            blitz_dom::TextSystemSingleton::initialize_once(
+                &device,
+                &queue,
+                TextureFormat::Rgba8Unorm,
+                wgpu::MultisampleState::default(),
+                None,
+            )
+        ).expect("Failed to initialize text system singleton");
+
         let texture = device.create_texture(&TextureDescriptor {
             label: Some("Target texture"),
             size,
@@ -74,8 +86,10 @@ impl ImageRenderer for VelloImageRenderer {
             usage: TextureUsages::STORAGE_BINDING | TextureUsages::COPY_SRC,
             view_formats: &[],
         });
+        println!("✅ VelloImageRenderer: Texture created");
 
         let texture_view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        println!("✅ VelloImageRenderer: Texture view created");
 
         let padded_byte_width = (width * 4).next_multiple_of(256);
         let buffer_size = padded_byte_width as u64 * height as u64;
@@ -85,7 +99,9 @@ impl ImageRenderer for VelloImageRenderer {
             usage: BufferUsages::MAP_READ | BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
+        println!("✅ VelloImageRenderer: GPU buffer created");
 
+        println!("✅ VelloImageRenderer: Constructing Self");
         Self {
             size,
             device,
@@ -103,11 +119,22 @@ impl ImageRenderer for VelloImageRenderer {
         draw_fn: F,
         cpu_buffer: &mut Vec<u8>,
     ) {
+        // Create glyphon state temporarily for this render
+        // (We can't store it in Self because it contains Rc which is not Send,
+        // and VelloImageRenderer must be Send for parallel WPT test execution)
+        let mut glyphon_state = GlyphonState::new(
+            &self.device,
+            &self.queue,
+            TextureFormat::Rgba8Unorm,
+            self.size.width,
+            self.size.height,
+        );
+        
         let mut scene = VelloScenePainter {
             inner: self.scene.take().unwrap_or_else(|| VelloScene::new()),
             renderer: &mut self.renderer,
             custom_paint_sources: &mut FxHashMap::default(),
-            glyphon_state: None,
+            glyphon_state: Some(&mut glyphon_state),
         };
         draw_fn(&mut scene);
         self.scene = Some(scene.finish());

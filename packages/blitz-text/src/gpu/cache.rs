@@ -42,7 +42,7 @@ impl Default for GpuResourceKey {
 // GpuResourceKey is no longer needed - goldylox uses String keys directly
 
 /// GPU resource value for goldylox caching
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct GpuResource {
     pub data: Vec<u8>,
     pub width: u32,

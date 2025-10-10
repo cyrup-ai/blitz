@@ -229,7 +229,7 @@ pub struct CursorCacheKey {
 }
 
 /// Processed bidirectional text with visual ordering
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default, PartialEq)]
 pub struct ProcessedBidi {
     pub text: String,
     pub visual_runs: Vec<VisualRun>,
@@ -240,7 +240,7 @@ pub struct ProcessedBidi {
 }
 
 /// Visual run with consistent direction and script
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default, PartialEq)]
 pub struct VisualRun {
     pub text: String,
     pub start_index: usize,

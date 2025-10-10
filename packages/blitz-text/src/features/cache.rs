@@ -30,7 +30,7 @@ impl FeaturesCacheKey {
 // FeaturesCacheKey is no longer needed - goldylox uses String keys directly
 
 /// Features cache value
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct FeaturesValue {
     pub features: Vec<String>,
     #[serde(skip, default = "std::time::Instant::now")]

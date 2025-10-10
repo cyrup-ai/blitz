@@ -70,7 +70,7 @@ bitflags = "2.9.4"
 tracing = { version = "0.1.41", optional = true }
 fastrand = "2.3.0"
 thiserror = "2.0"
-tokio = { version = "1.47", features = ["rt"] }
+tokio = { version = "1.47", features = ["rt", "sync"] }
 
 # Media & Decoding
 image = { version = "0.25", default-features = false }

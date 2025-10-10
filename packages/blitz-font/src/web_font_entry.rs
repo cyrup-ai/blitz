@@ -33,7 +33,7 @@ impl WebFontCacheKey {
 }
 
 /// Web font cache entry with loading status and data
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct WebFontEntry {
     pub url: String,
     pub status: FontLoadStatus,
