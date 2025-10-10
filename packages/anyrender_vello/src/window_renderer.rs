@@ -228,13 +228,13 @@ impl WindowRenderer for VelloWindowRenderer {
                 println!("🎯 INITIALIZING TEXT SYSTEM with GPU context");
                 // Initialize text system with GPU context for hardware-accelerated rendering
                 // Same parameters as TextRenderer::new() - see lib.rs for detailed explanation
-                match base_doc.initialize_text_system_with_gpu_context(
+                match pollster::block_on(base_doc.initialize_text_system_with_gpu_context(
                     &device_handle.device,
                     &device_handle.queue,
                     format,
                     wgpu::MultisampleState::default(), // Single-sample, glyphon handles AA
                     None, // No depth stencil for 2D text
-                ) {
+                )) {
                     Ok(()) => {
                         println!("✅ TEXT SYSTEM INITIALIZED SUCCESSFULLY");
                         Ok(())
@@ -348,7 +348,7 @@ impl WindowRenderer for VelloWindowRenderer {
         }
         timer.record_time("text_prepare");
 
-        state
+        pollster::block_on(state
             .renderer
             .render_to_texture(
                 &device_handle.device,
@@ -356,7 +356,7 @@ impl WindowRenderer for VelloWindowRenderer {
                 self.scene.as_ref().unwrap(),
                 &surface.target_view,
                 &render_params,
-            )
+            ))
             .expect("failed to render to texture");
         timer.record_time("render");
 

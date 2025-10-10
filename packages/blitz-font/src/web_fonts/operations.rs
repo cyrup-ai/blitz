@@ -32,7 +32,7 @@ impl WebFontOperations {
             access_count: 0,
         };
 
-        cache_manager.insert(url.clone(), entry)?;
+        cache_manager.insert(url.clone(), entry).await?;
 
         // Download font data
         match client.get(url.clone()).send().await {
@@ -56,7 +56,7 @@ impl WebFontOperations {
                                     access_count: 1,
                                 };
 
-                                let _ = cache_manager.insert(url, loaded_entry);
+                                let _ = cache_manager.insert(url, loaded_entry).await;
                                 Ok(font_key)
                             }
                             Err(e) => {
@@ -72,7 +72,7 @@ impl WebFontOperations {
                                     access_count: 0,
                                 };
 
-                                let _ = cache_manager.insert(url, failed_entry);
+                                let _ = cache_manager.insert(url, failed_entry).await;
                                 Err(e)
                             }
                         }
@@ -106,7 +106,7 @@ impl WebFontOperations {
             access_count: 0,
         };
 
-        let _ = cache_manager.insert(url, failed_entry);
+        let _ = cache_manager.insert(url, failed_entry).await;
     }
 
     /// Clear stale cache entries
@@ -115,7 +115,7 @@ impl WebFontOperations {
         _max_age: Duration,
     ) -> usize {
         let initial_size = cache_manager.size();
-        let _ = cache_manager.cleanup_stale();
+        let _ = cache_manager.cleanup_stale().await;
         let final_size = cache_manager.size();
         initial_size.saturating_sub(final_size)
     }
@@ -177,7 +177,7 @@ impl WebFontOperations {
             tokio::time::sleep(wait_time).await;
 
             let cache = cache_manager.get_cache();
-            if let Some(entry) = cache.get(url) {
+            if let Some(entry) = cache.get(url).await {
                 match entry.status {
                     FontLoadStatus::Loaded => {
                         if let Some(ref data) = entry.data {

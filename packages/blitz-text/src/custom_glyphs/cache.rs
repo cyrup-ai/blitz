@@ -35,7 +35,7 @@ pub struct CustomGlyphsCache {
 }
 
 impl CustomGlyphsCache {
-    pub fn new() -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn new() -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         let cache = GoldyloxBuilder::<String, CustomGlyphData>::new()
             .hot_tier_max_entries(2000)
             .hot_tier_memory_limit_mb(64)
@@ -45,22 +45,22 @@ impl CustomGlyphsCache {
             .compression_level(2)
             .background_worker_threads(1)
             .cache_id("custom_glyphs_cache")
-            .build()?;
+            .build().await?;
 
         Ok(Self { cache })
     }
 
-    pub fn get(&self, key: &str) -> Option<CustomGlyphData> {
-        self.cache.get(key)
+    pub async fn get(&self, key: &str) -> Option<CustomGlyphData> {
+        self.cache.get(key).await
     }
 
-    pub fn put(&self, key: String, value: CustomGlyphData) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        self.cache.put(key, value)
+    pub async fn put(&self, key: String, value: CustomGlyphData) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        self.cache.put(key, value).await
             .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
     }
 
-    pub fn clear(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        self.cache.clear()
+    pub async fn clear(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        self.cache.clear().await
             .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
     }
 
@@ -87,14 +87,25 @@ impl CustomGlyphsCache {
 
 impl Default for CustomGlyphsCache {
     fn default() -> Self {
-        Self::new().unwrap_or_else(|_| {
-            // Fallback: create a minimal cache that always works
-            CustomGlyphsCache {
-                cache: GoldyloxBuilder::<String, CustomGlyph>::new()
-                    .cache_id("custom_glyphs_cache_fallback")
-                    .build()
-                    .unwrap(),
-            }
-        })
+        // Since new() is async and Default can't be async, we use a blocking approach
+        use tokio::runtime::Handle;
+        
+        // Try to use current runtime if available
+        if let Ok(handle) = Handle::try_current() {
+            handle.block_on(async {
+                Self::new().await.unwrap_or_else(|_| {
+                    panic!("Failed to create CustomGlyphsCache")
+                })
+            })
+        } else {
+            // No runtime available, create one temporarily
+            tokio::runtime::Runtime::new()
+                .expect("Failed to create tokio runtime")
+                .block_on(async {
+                    Self::new().await.unwrap_or_else(|_| {
+                        panic!("Failed to create CustomGlyphsCache")
+                    })
+                })
+        }
     }
 }

@@ -70,7 +70,7 @@ impl TextSystemSingleton {
     /// * `Ok(())` - Initialization successful or already initialized
     /// * `Err(TextSystemSingletonError)` - Initialization failed
     #[inline]
-    pub fn initialize_once(
+    pub async fn initialize_once(
         device: &Device,
         queue: &Queue,
         format: TextureFormat,
@@ -94,7 +94,7 @@ impl TextSystemSingleton {
             format,
             multisample,
             depth_stencil,
-        ).map_err(TextSystemSingletonError::from)?;
+        ).await.map_err(TextSystemSingletonError::from)?;
 
         // Attempt to set the singleton
         match instance.set(text_system) {

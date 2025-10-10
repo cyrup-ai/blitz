@@ -100,24 +100,24 @@ enum CacheType {
 }
 
 impl FontMetricsCache {
-    pub fn new() -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn new() -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         println!("✅ FontMetricsCache using Goldylox for efficient multi-tier caching");
         
         // Use Goldylox with proper types (both FontMetricsCacheKey and FontMetrics implement required traits)
         let cache = GoldyloxBuilder::<FontMetricsCacheKey, FontMetrics>::new()
             .hot_tier_memory_limit_mb(8) // 8MB for font metrics
             .cold_tier_max_size_bytes(0) // In-memory only for font metrics (lightweight data)
-            .build()?;
+            .build().await?;
             
         let cache_type = CacheType::Goldylox(cache);
 
         Ok(Self { cache_type })
     }
 
-    pub fn get(&self, font_id: fontdb::ID, font_size: f32) -> Option<FontMetrics> {
+    pub async fn get(&self, font_id: fontdb::ID, font_size: f32) -> Option<FontMetrics> {
         let key = FontMetricsCacheKey::new(font_id, font_size);
         match &self.cache_type {
-            CacheType::Goldylox(cache) => cache.get(&key),
+            CacheType::Goldylox(cache) => cache.get(&key).await,
             CacheType::HashMap(map) => {
                 if let Ok(map) = map.lock() {
                     map.get(&key).cloned()
@@ -128,7 +128,7 @@ impl FontMetricsCache {
         }
     }
 
-    pub fn put(
+    pub async fn put(
         &self,
         font_id: fontdb::ID,
         font_size: f32,
@@ -138,7 +138,7 @@ impl FontMetricsCache {
         match &self.cache_type {
             CacheType::Goldylox(cache) => {
                 cache
-                    .put(key, metrics)
+                    .put(key, metrics).await
                     .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
             }
             CacheType::HashMap(map) => {
@@ -160,11 +160,11 @@ impl FontMetricsCache {
         }
     }
 
-    pub fn clear(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn clear(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         match &self.cache_type {
             CacheType::Goldylox(cache) => {
                 cache
-                    .clear()
+                    .clear().await
                     .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
             }
             CacheType::HashMap(map) => {
@@ -202,12 +202,31 @@ impl FontMetricsCache {
 
 impl Default for FontMetricsCache {
     fn default() -> Self {
-        Self::new().unwrap_or_else(|_| {
-            // Fallback: create a minimal HashMap-based cache that always works
-            FontMetricsCache {
-                cache_type: CacheType::HashMap(Mutex::new(HashMap::new())),
-            }
-        })
+        // Since new() is async and Default can't be async, we use a blocking approach
+        use tokio::runtime::Handle;
+        
+        // Try to use current runtime if available
+        if let Ok(handle) = Handle::try_current() {
+            handle.block_on(async {
+                Self::new().await.unwrap_or_else(|_| {
+                    // Fallback: create a minimal HashMap-based cache that always works
+                    FontMetricsCache {
+                        cache_type: CacheType::HashMap(Mutex::new(HashMap::new())),
+                    }
+                })
+            })
+        } else {
+            // No runtime available, create one temporarily
+            tokio::runtime::Runtime::new()
+                .expect("Failed to create tokio runtime")
+                .block_on(async {
+                    Self::new().await.unwrap_or_else(|_| {
+                        FontMetricsCache {
+                            cache_type: CacheType::HashMap(Mutex::new(HashMap::new())),
+                        }
+                    })
+                })
+        }
     }
 }
 
@@ -217,13 +236,13 @@ pub struct FontMetricsCalculator {
 }
 
 impl FontMetricsCalculator {
-    pub fn new() -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
-        let cache = FontMetricsCache::new()?;
+    pub async fn new() -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+        let cache = FontMetricsCache::new().await?;
         Ok(Self { cache })
     }
 
-    pub fn calculate(&self, font_id: fontdb::ID, font_size: f32) -> Option<FontMetrics> {
-        if let Some(cached) = self.cache.get(font_id, font_size) {
+    pub async fn calculate(&self, font_id: fontdb::ID, font_size: f32) -> Option<FontMetrics> {
+        if let Some(cached) = self.cache.get(font_id, font_size).await {
             return Some(cached);
         }
 
@@ -246,19 +265,19 @@ impl FontMetricsCalculator {
             strikethrough_thickness: font_size * 0.05,
         };
 
-        if let Err(e) = self.cache.put(font_id, font_size, metrics.clone()) {
+        if let Err(e) = self.cache.put(font_id, font_size, metrics.clone()).await {
             eprintln!("Warning: Failed to cache font metrics: {}", e);
         }
 
         Some(metrics)
     }
 
-    pub fn get_cached(&self, font_id: fontdb::ID, font_size: f32) -> Option<FontMetrics> {
-        self.cache.get(font_id, font_size)
+    pub async fn get_cached(&self, font_id: fontdb::ID, font_size: f32) -> Option<FontMetrics> {
+        self.cache.get(font_id, font_size).await
     }
 
-    pub fn clear_cache(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        self.cache.clear()
+    pub async fn clear_cache(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        self.cache.clear().await
     }
 
     /// Extract comprehensive font metrics for given attributes
@@ -327,12 +346,30 @@ impl FontMetricsCalculator {
 
 impl Default for FontMetricsCalculator {
     fn default() -> Self {
-        Self::new().unwrap_or_else(|_| {
-            // Fallback: Use HashMap-based cache when goldylox initialization fails
-            // FontMetricsCache::default() already provides this fallback
-            FontMetricsCalculator {
-                cache: FontMetricsCache::default(),
-            }
-        })
+        // Since new() is async and Default can't be async, we use a blocking approach
+        use tokio::runtime::Handle;
+        
+        // Try to use current runtime if available
+        if let Ok(handle) = Handle::try_current() {
+            handle.block_on(async {
+                Self::new().await.unwrap_or_else(|_| {
+                    // Fallback: Use HashMap-based cache when goldylox initialization fails
+                    FontMetricsCalculator {
+                        cache: FontMetricsCache::default(),
+                    }
+                })
+            })
+        } else {
+            // No runtime available, create one temporarily
+            tokio::runtime::Runtime::new()
+                .expect("Failed to create tokio runtime")
+                .block_on(async {
+                    Self::new().await.unwrap_or_else(|_| {
+                        FontMetricsCalculator {
+                            cache: FontMetricsCache::default(),
+                        }
+                    })
+                })
+        }
     }
 }

@@ -22,6 +22,7 @@ use taffy::ResolveOrZero;
 #[derive(Debug, Clone)]
 pub struct MasonryItemBaseline {
     /// The item's node ID
+    #[allow(dead_code)] // False positive: field IS used extensively, compiler confused by derived traits
     pub node_id: NodeId,
     /// Grid-axis track position (for grouping)
     pub grid_axis_track: usize,
@@ -71,7 +72,7 @@ pub fn should_align_baseline(
 
         // Check for baseline alignment values
         // Note: Taffy currently only supports Baseline (not FirstBaseline/LastBaseline variants)
-        matches!(align_value, Some(taffy::AlignItems::Baseline))
+        matches!(align_value, Some(taffy::AlignSelf::Baseline))
     } else {
         false
     }
@@ -145,6 +146,7 @@ fn extract_top_margin(
     tree: &BaseDocument,
     item_id: NodeId,
     masonry_axis: AbstractAxis,
+    container_size: taffy::Size<Option<f32>>,
 ) -> f32 {
     let node = tree.node_from_id(item_id.into());
 
@@ -161,17 +163,12 @@ fn extract_top_margin(
         use stylo_taffy::convert;
         let taffy_margin = convert::margin(margin_value);
 
-        // Get parent size for percentage resolution (if available)
-        let parent_size = node.final_layout.size;
-        let parent_dimension = match masonry_axis {
-            AbstractAxis::Block => parent_size.height,
-            AbstractAxis::Inline => parent_size.width,
-        };
-
+        // ✅ FIX: Use container size from inputs, not final_layout
+        // Per CSS spec, percentage margins resolve against the INLINE size
+        let parent_inline_size = container_size.width;
+        
         // Resolve margin to pixels (Auto resolves to 0.0)
-        // Note: Using no-op calc resolver since we don't have BaseDocument access here
-        // and margins typically don't use calc() in masonry contexts
-        taffy_margin.resolve_or_zero(Some(parent_dimension), |_, _| 0.0)
+        taffy_margin.resolve_or_zero(parent_inline_size, |_, _| 0.0)
     } else {
         0.0
     }
@@ -182,6 +179,7 @@ pub fn calculate_baseline_adjustments(
     tree: &BaseDocument,
     placed_items: &[(NodeId, stylo_taffy::GridArea)],
     masonry_axis: AbstractAxis,
+    container_size: taffy::Size<Option<f32>>,
 ) -> Result<Vec<BaselineAdjustment>, GridPreprocessingError> {
     // Step 1: Extract baseline info for all items that need baseline alignment
     let mut baseline_items: Vec<(usize, MasonryItemBaseline)> = Vec::new();
@@ -192,7 +190,7 @@ pub fn calculate_baseline_adjustments(
         }
 
         let baseline_offset = extract_item_baseline(tree, *item_id);
-        let top_margin = extract_top_margin(tree, *item_id, masonry_axis);
+        let top_margin = extract_top_margin(tree, *item_id, masonry_axis, container_size);
         let item_height = grid_area.masonry_axis_size;
         let grid_axis_track = grid_area.grid_axis_start;
 

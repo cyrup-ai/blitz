@@ -1,6 +1,6 @@
 //! Core coordination methods for CSS Grid Multi-Pass Layout System
 
-use taffy::{NodeId, geometry::AbstractAxis, TraversePartialTree};
+use taffy::{NodeId, geometry::AbstractAxis, TraversePartialTree, GridContainerStyle};
 
 use crate::BaseDocument;
 use super::super::grid_context::ParentGridContext;
@@ -80,14 +80,54 @@ impl GridLayoutCoordinator {
     where
         Tree: taffy::LayoutGridContainer + taffy::TraversePartialTree + std::any::Any,
     {
-        // 1. Initialize placement state
+        // 1. Initialize placement state with proper grid size, flow direction, and dense packing
+        
+        // FIX 1: Get grid size from inherited tracks or use reasonable default
+        let grid_size = if let Some(subgrid_state) = self.subgrid_states.get(&subgrid_id) {
+            GridPosition {
+                row: subgrid_state.inherited_tracks.row_tracks.len() as i32,
+                column: subgrid_state.inherited_tracks.column_tracks.len() as i32,
+            }
+        } else {
+            // Fallback: use reasonable default that can grow if needed
+            GridPosition { row: 12, column: 12 }
+        };
+
+        // FIX 2: Read grid-auto-flow from CSS to determine flow direction
+        let grid_style = tree.get_grid_container_style(subgrid_id);
+        let auto_flow = grid_style.grid_auto_flow();
+        
+        let flow_direction = match auto_flow {
+            taffy::GridAutoFlow::Row | taffy::GridAutoFlow::RowDense => FlowDirection::Row,
+            taffy::GridAutoFlow::Column | taffy::GridAutoFlow::ColumnDense => FlowDirection::Column,
+        };
+
+        // FIX 3: Initialize dense packing state if auto-flow contains "dense"
+        let dense_enabled = matches!(
+            auto_flow,
+            taffy::GridAutoFlow::RowDense | taffy::GridAutoFlow::ColumnDense
+        );
+
+        let dense_packing_state = if dense_enabled {
+            Some(DensePackingState {
+                unfilled_positions: Vec::new(),
+                pending_items: Vec::new(),
+                enabled: true,
+            })
+        } else {
+            None
+        };
+
         let mut placement_state = AutoPlacementState {
             cursor_position: GridPosition::default(),
             ordered_items: Vec::new(),
             explicit_placements: std::collections::HashMap::new(),
-            dense_packing_state: None,
-            track_occupancy: TrackOccupancyMap::default(),
-            flow_direction: FlowDirection::default(), // Default to Row flow
+            dense_packing_state,
+            track_occupancy: TrackOccupancyMap {
+                occupied_cells: std::collections::HashMap::new(),
+                grid_size,
+            },
+            flow_direction,
         };
 
         // 2. Process items in CSS order

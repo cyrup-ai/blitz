@@ -95,7 +95,7 @@ pub struct EnhancedGpuCache {
 }
 
 impl EnhancedGpuCache {
-    pub fn new(device: &wgpu::Device) -> Result<Self, Box<dyn std::error::Error>> {
+    pub async fn new(device: &wgpu::Device) -> Result<Self, Box<dyn std::error::Error>> {
         let glyphon_cache = glyphon::Cache::new(device);
 
         let resource_cache = GoldyloxBuilder::<String, GpuResource>::new()
@@ -107,7 +107,7 @@ impl EnhancedGpuCache {
             .compression_level(6)
             .background_worker_threads(4)
             .cache_id("enhanced_gpu_cache")
-            .build()?;
+            .build().await?;
 
         Ok(Self {
             glyphon_cache,
@@ -131,14 +131,14 @@ impl EnhancedGpuCache {
     }
 
     /// Get GPU resource from resource cache
-    pub fn get(&self, key: &str) -> Option<GpuResource> {
-        self.resource_cache.get(&key.to_string())
+    pub async fn get(&self, key: &str) -> Option<GpuResource> {
+        self.resource_cache.get(&key.to_string()).await
     }
 
     /// Put GPU resource into resource cache
-    pub fn put(&self, key: String, value: GpuResource) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn put(&self, key: String, value: GpuResource) -> Result<(), Box<dyn std::error::Error>> {
         let result = self.resource_cache
-            .put(key, value)
+            .put(key, value).await
             .map_err(|e| Box::new(e) as Box<dyn std::error::Error>);
 
         if result.is_ok() {
@@ -149,8 +149,8 @@ impl EnhancedGpuCache {
     }
 
     /// Clear resource cache
-    pub fn clear(&self) {
-        if let Err(e) = self.resource_cache.clear() {
+    pub async fn clear(&self) {
+        if let Err(e) = self.resource_cache.clear().await {
             eprintln!("Warning: Failed to clear GPU resource cache: {}", e);
         } else {
             self.resource_cache_size.store(0, Ordering::Relaxed);
@@ -212,7 +212,7 @@ pub struct TextureAtlasCache {
 }
 
 impl TextureAtlasCache {
-    pub fn new() -> Result<Self, Box<dyn std::error::Error>> {
+    pub async fn new() -> Result<Self, Box<dyn std::error::Error>> {
         let cache = GoldyloxBuilder::<String, GpuResource>::new()
             .hot_tier_max_entries(1000)
             .hot_tier_memory_limit_mb(64)
@@ -222,7 +222,7 @@ impl TextureAtlasCache {
             .compression_level(7)
             .background_worker_threads(2)
             .cache_id("texture_atlas_cache")
-            .build()?;
+            .build().await?;
 
         Ok(Self { cache })
     }
@@ -232,26 +232,41 @@ impl TextureAtlasCache {
         Ok(())
     }
 
-    pub fn get(&self, key: &str) -> Option<GpuResource> {
-        self.cache.get(&key.to_string())
+    pub async fn get(&self, key: &str) -> Option<GpuResource> {
+        self.cache.get(&key.to_string()).await
     }
 
-    pub fn put(&self, key: String, value: GpuResource) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn put(&self, key: String, value: GpuResource) -> Result<(), Box<dyn std::error::Error>> {
         self.cache
-            .put(key, value)
+            .put(key, value).await
             .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)
     }
 
-    pub fn clear(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn clear(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         self.cache
-            .clear()
+            .clear().await
             .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)
     }
 }
 
 impl Default for TextureAtlasCache {
     fn default() -> Self {
-        Self::new().unwrap_or_else(|_| panic!("Failed to create texture atlas cache"))
+        // Since new() is async and Default can't be async, we use a blocking approach
+        use tokio::runtime::Handle;
+        
+        // Try to use current runtime if available
+        if let Ok(handle) = Handle::try_current() {
+            handle.block_on(async {
+                Self::new().await.unwrap_or_else(|_| panic!("Failed to create texture atlas cache"))
+            })
+        } else {
+            // No runtime available, create one temporarily
+            tokio::runtime::Runtime::new()
+                .expect("Failed to create tokio runtime")
+                .block_on(async {
+                    Self::new().await.unwrap_or_else(|_| panic!("Failed to create texture atlas cache"))
+                })
+        }
     }
 }
 

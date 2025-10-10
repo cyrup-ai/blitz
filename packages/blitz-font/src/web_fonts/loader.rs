@@ -62,8 +62,8 @@ impl WebFontLoader {
     /// # Errors
     /// Returns `FontError::CacheInitializationError` if cache creation fails
     /// Returns `FontError::NetworkError` if HTTP client creation fails
-    pub fn new() -> Result<Self, FontError> {
-        Self::with_config(WebFontLoaderConfig::default())
+    pub async fn new() -> Result<Self, FontError> {
+        Self::with_config(WebFontLoaderConfig::default()).await
     }
 
     /// Create a new WebFontLoader with custom configuration
@@ -71,9 +71,9 @@ impl WebFontLoader {
     /// # Errors
     /// Returns `FontError::CacheInitializationError` if cache creation fails
     /// Returns `FontError::NetworkError` if HTTP client creation fails
-    pub fn with_config(config: WebFontLoaderConfig) -> Result<Self, FontError> {
+    pub async fn with_config(config: WebFontLoaderConfig) -> Result<Self, FontError> {
         let cache_manager =
-            CacheManager::new(config.max_cache_size, config.cache_ttl).map_err(|e| {
+            CacheManager::new(config.max_cache_size, config.cache_ttl).await.map_err(|e| {
                 FontError::CacheInitializationError(format!(
                     "Failed to initialize cache manager: {}",
                     e
@@ -110,10 +110,10 @@ impl WebFontLoader {
     ///
     /// Uses in-memory only cache and basic HTTP client
     /// Should only be used in test environments
-    pub fn minimal() -> Self {
+    pub async fn minimal() -> Self {
         // This is the only place where we allow unwrap, but only for testing
         // and with guaranteed-safe minimal configuration
-        let cache_manager = CacheManager::new(100, Duration::from_secs(60))
+        let cache_manager = CacheManager::new(100, Duration::from_secs(60)).await
             .expect("Minimal cache configuration should never fail");
 
         let client = reqwest::Client::new(); // Basic client without custom config
@@ -142,7 +142,7 @@ impl WebFontLoader {
     pub async fn load_font(&self, url: Url) -> Result<FontKey, FontError> {
         // Check cache first
         let cache = self.cache_manager.get_cache();
-        if let Some(entry) = cache.get(&url) {
+        if let Some(entry) = cache.get(&url).await {
             match entry.status {
                 FontLoadStatus::Loaded => {
                     if let Some(ref data) = entry.data {
@@ -215,7 +215,7 @@ impl WebFontLoader {
                         let _ = respond_to.send(result);
                     }
                     WebFontOperation::GetStats { respond_to } => {
-                        let stats = cache_manager.get_stats();
+                        let stats = cache_manager.get_stats().await;
                         let _ = respond_to.send(stats);
                     }
                 }
@@ -251,9 +251,9 @@ impl WebFontLoader {
     }
 
     /// Get cached font entry
-    pub fn get_cached_entry(&self, url: &Url) -> Result<Option<WebFontEntry>, FontError> {
+    pub async fn get_cached_entry(&self, url: &Url) -> Result<Option<WebFontEntry>, FontError> {
         let cache = self.cache_manager.get_cache();
-        Ok(cache.get(url))
+        Ok(cache.get(url).await)
     }
 
     /// Preload a font without blocking

@@ -14,12 +14,12 @@ use crate::text_system::config::{PreparedText, TextAreaConfig, TextSystemResult}
 
 impl UnifiedTextSystem {
     /// Measure and prepare text for GPU rendering
-    pub fn measure_and_prepare(
+    pub async fn measure_and_prepare(
         &mut self,
         device: &Device,
         queue: &Queue,
         text: &str,
-        attrs: Attrs,
+        attrs: Attrs<'_>,
         position: (f32, f32),
         scale: f32,
         bounds: TextBounds,
@@ -30,7 +30,7 @@ impl UnifiedTextSystem {
         let start_time = Instant::now();
 
         // Step 1: Measure text layout
-        let measurement = self.measure_text(text, attrs.clone(), max_width, max_height)?;
+        let measurement = self.measure_text(text, attrs.clone(), max_width, max_height).await?;
 
         // Step 2: Get custom glyphs first (before borrowing font_system)
         let custom_glyphs = self

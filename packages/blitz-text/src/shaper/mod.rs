@@ -176,10 +176,10 @@ impl TextShaper {
     }
 
     /// Shape text with full internationalization support (zero allocation hot path)
-    pub fn shape_text(
+    pub async fn shape_text(
         &mut self,
         text: &str,
-        attrs: Attrs,
+        attrs: Attrs<'_>,
         max_width: Option<f32>,
     ) -> Result<Arc<ShapedText>, ShapingError> {
         SHAPING_OPERATIONS.fetch_add(1, Ordering::Relaxed);
@@ -201,7 +201,7 @@ impl TextShaper {
 
         // Check cache first (lock-free lookup)
         let string_key = Self::key_to_string(&cache_key);
-        if let Some(cached) = self.cache.get(&string_key) {
+        if let Some(cached) = self.cache.get(&string_key).await {
             CACHE_HITS.fetch_add(1, Ordering::Relaxed);
             return Ok(Arc::new(cached));
         }
@@ -281,7 +281,7 @@ impl TextShaper {
         // Cache result if appropriate
         if shaped_text.runs.len() > 1 || text.len() > 10 {
             let string_key = Self::key_to_string(&cache_key);
-            if let Err(_) = self.cache.put(string_key, (*shaped_text).clone()) {
+            if let Err(_) = self.cache.put(string_key, (*shaped_text).clone()).await {
                 // Cache failure is non-fatal, continue with result
             }
         }
@@ -328,8 +328,8 @@ impl TextShaper {
     }
 
     /// Clear all caches
-    pub fn clear_caches(&mut self) {
-        if let Err(_) = self.cache.clear() {
+    pub async fn clear_caches(&mut self) {
+        if let Err(_) = self.cache.clear().await {
             // Cache clear failure is non-fatal
         }
         self.analyzer.clear_caches();

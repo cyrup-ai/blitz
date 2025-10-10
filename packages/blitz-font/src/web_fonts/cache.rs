@@ -94,7 +94,7 @@ pub struct WebFontCache {
 }
 
 impl WebFontCache {
-    pub fn new() -> Result<Self, FontError> {
+    pub async fn new() -> Result<Self, FontError> {
         let cache = GoldyloxBuilder::new()
             .hot_tier_max_entries(500)
             .hot_tier_memory_limit_mb(32)
@@ -104,7 +104,7 @@ impl WebFontCache {
             .compression_level(8)
             .background_worker_threads(2)
             .cache_id("web_font_cache")
-            .build()
+            .build().await
             .map_err(|e| FontError::CacheError(e.to_string()))?;
 
         Ok(Self {
@@ -115,15 +115,15 @@ impl WebFontCache {
     }
 
     /// Update entry tracking when adding entries
-    pub fn with_entry(self, url: Url, entry: WebFontEntry) -> Self {
+    pub async fn with_entry(self, url: Url, entry: WebFontEntry) -> Self {
         let key = WebFontCacheKey::from(url);
 
         // Check if this is a new entry
-        let is_new_entry = self.cache.get(&key).is_none();
+        let is_new_entry = self.cache.get(&key).await.is_none();
 
         // Update cache
         let mut new_cache = self.clone();
-        if let Err(e) = new_cache.cache.put(key, entry) {
+        if let Err(e) = new_cache.cache.put(key, entry).await {
             log::warn!("Failed to insert cache entry: {}", e);
             return self; // Return unchanged on error
         }
@@ -138,14 +138,14 @@ impl WebFontCache {
     }
 
     /// Update entry tracking when removing entries
-    pub fn without_entry(self, url: &Url) -> Self {
+    pub async fn without_entry(self, url: &Url) -> Self {
         let key = WebFontCacheKey::from(url.clone());
 
         // Check if entry exists before removal
-        let entry_exists = self.cache.get(&key).is_some();
+        let entry_exists = self.cache.get(&key).await.is_some();
 
         let mut new_cache = self.clone();
-        if new_cache.cache.remove(&key) && entry_exists {
+        if new_cache.cache.remove(&key).await && entry_exists {
             // Successfully removed existing entry
             new_cache.entry_count.fetch_sub(1, Ordering::Relaxed);
         }
@@ -176,14 +176,14 @@ impl WebFontCache {
         }
     }
 
-    pub fn get(&self, url: &Url) -> Option<WebFontEntry> {
+    pub async fn get(&self, url: &Url) -> Option<WebFontEntry> {
         let key = WebFontCacheKey::from(url.clone());
-        self.cache.get(&key)
+        self.cache.get(&key).await
     }
 
-    pub fn contains(&self, url: &Url) -> bool {
+    pub async fn contains(&self, url: &Url) -> bool {
         let key = WebFontCacheKey::from(url.clone());
-        self.cache.get(&key).is_some()
+        self.cache.get(&key).await.is_some()
     }
 
     /// Parse goldylox statistics to estimate entry count
@@ -223,7 +223,7 @@ impl WebFontCache {
     }
 
     /// Get accurate cache size using hybrid approach
-    pub fn len(&self) -> usize {
+    pub async fn len(&self) -> usize {
         // Try goldylox statistics first for accuracy
         if let Ok(stats_str) = self.cache.stats() {
             if let Ok(parsed) = self.parse_goldylox_stats(&stats_str) {
@@ -235,8 +235,8 @@ impl WebFontCache {
         self.entry_count.load(Ordering::Relaxed)
     }
 
-    pub fn is_empty(&self) -> bool {
-        self.len() == 0
+    pub async fn is_empty(&self) -> bool {
+        self.len().await == 0
     }
 
     // Note: Iterator methods removed as goldylox doesn't support direct iteration
@@ -255,8 +255,8 @@ pub struct CacheManager {
 }
 
 impl CacheManager {
-    pub fn new(max_size: usize, ttl: Duration) -> Result<Self, FontError> {
-        let initial_cache = Box::into_raw(Box::new(WebFontCache::new()?));
+    pub async fn new(max_size: usize, ttl: Duration) -> Result<Self, FontError> {
+        let initial_cache = Box::into_raw(Box::new(WebFontCache::new().await?));
         Ok(Self {
             cache: Arc::new(AtomicPtr::new(initial_cache)),
             cache_size: AtomicUsize::new(0),
@@ -274,13 +274,14 @@ impl CacheManager {
     }
 
     /// Atomic cache update using compare-and-swap
-    pub fn update_cache<F>(&self, update_fn: F) -> Result<(), FontError>
+    pub async fn update_cache<F, Fut>(&self, update_fn: F) -> Result<(), FontError>
     where
-        F: Fn(WebFontCache) -> WebFontCache,
+        F: Fn(WebFontCache) -> Fut,
+        Fut: std::future::Future<Output = WebFontCache>,
     {
         loop {
             let current_cache = self.get_cache();
-            let new_cache = update_fn(current_cache);
+            let new_cache = update_fn(current_cache).await;
             let new_ptr = Box::into_raw(Box::new(new_cache.clone()));
 
             match self.cache.compare_exchange(
@@ -294,7 +295,7 @@ impl CacheManager {
                     unsafe {
                         let _ = Box::from_raw(old_ptr);
                     }
-                    self.cache_size.store(new_cache.len(), Ordering::Release);
+                    self.cache_size.store(new_cache.len().await, Ordering::Release);
                     return Ok(());
                 }
                 Err(_) => {
@@ -308,29 +309,40 @@ impl CacheManager {
     }
 
     /// Add or update an entry in the cache
-    pub fn insert(&self, url: Url, entry: WebFontEntry) -> Result<(), FontError> {
+    pub async fn insert(&self, url: Url, entry: WebFontEntry) -> Result<(), FontError> {
+        let max_size = self.max_size;
+        let url = &url;
+        let entry = &entry;
         self.update_cache(|cache| {
-            let updated = cache.with_entry(url.clone(), entry.clone());
-            if updated.len() > self.max_size {
-                updated.with_size_limit(self.max_size)
-            } else {
-                updated
+            let url = url.clone();
+            let entry = entry.clone();
+            async move {
+                let updated = cache.with_entry(url, entry).await;
+                if updated.len().await > max_size {
+                    updated.with_size_limit(max_size)
+                } else {
+                    updated
+                }
             }
-        })
+        }).await
     }
 
     /// Remove an entry from the cache
-    pub fn remove(&self, url: &Url) -> Result<(), FontError> {
-        self.update_cache(|cache| cache.without_entry(url))
+    pub async fn remove(&self, url: &Url) -> Result<(), FontError> {
+        self.update_cache(|cache| {
+            let url = url.clone();
+            async move { cache.without_entry(&url).await }
+        }).await
     }
 
     /// Clean up stale entries based on TTL
-    pub fn cleanup_stale(&self) -> Result<(), FontError> {
-        self.update_cache(|cache| cache.without_stale_entries(self.ttl))
+    pub async fn cleanup_stale(&self) -> Result<(), FontError> {
+        let ttl = self.ttl;
+        self.update_cache(|cache| async move { cache.without_stale_entries(ttl) }).await
     }
 
     /// Get cache statistics - CORRECTED VERSION using goldylox API
-    pub fn get_stats(&self) -> WebFontCacheStats {
+    pub async fn get_stats(&self) -> WebFontCacheStats {
         let cache = self.get_cache();
 
         // ✅ USE ACTUAL GOLDYLOX STATISTICS instead of hardcoded values
@@ -341,7 +353,7 @@ impl CacheManager {
                 // Parse JSON statistics from goldylox
                 if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&stats_json) {
                     WebFontCacheStats {
-                        total_entries: cache.len(),
+                        total_entries: cache.len().await,
                         loaded_count: (parsed["hot_tier_hits"].as_u64().unwrap_or(0)
                             + parsed["warm_tier_hits"].as_u64().unwrap_or(0)
                             + parsed["cold_tier_hits"].as_u64().unwrap_or(0))
@@ -353,24 +365,25 @@ impl CacheManager {
                     }
                 } else {
                     // Fallback to current implementation if JSON parsing fails
-                    self.get_fallback_stats(&cache)
+                    self.get_fallback_stats(&cache).await
                 }
             }
             Err(_) => {
                 // Fallback to current implementation if stats() fails
-                self.get_fallback_stats(&cache)
+                self.get_fallback_stats(&cache).await
             }
         }
     }
 
-    fn get_fallback_stats(&self, cache: &WebFontCache) -> WebFontCacheStats {
+    async fn get_fallback_stats(&self, cache: &WebFontCache) -> WebFontCacheStats {
         // Current implementation as fallback
+        let len = cache.len().await;
         WebFontCacheStats {
-            total_entries: cache.len(),
-            loaded_count: cache.len(),
+            total_entries: len,
+            loaded_count: len,
             loading_count: self.loading_operations.load(Ordering::Relaxed) as usize,
             failed_count: self.failed_loads.load(Ordering::Relaxed) as usize,
-            total_size: (cache.len() as u64) * 1024,
+            total_size: (len as u64) * 1024,
             total_access_count: 0,
         }
     }
@@ -423,16 +436,24 @@ impl Drop for CacheManager {
 
 impl Default for WebFontCache {
     fn default() -> Self {
-        Self::new().unwrap_or_else(|_| {
-            // Fallback: create a minimal cache that always works
-            WebFontCache {
-                cache: GoldyloxBuilder::<WebFontCacheKey, WebFontEntry>::new()
-                    .cache_id("webfont_cache_fallback")
-                    .build()
-                    .unwrap(),
-                generation: 0,
-                entry_count: Arc::new(AtomicUsize::new(0)),
-            }
-        })
+        use tokio::runtime::Handle;
+        
+        // Try to use current runtime if available
+        if let Ok(handle) = Handle::try_current() {
+            handle.block_on(async {
+                Self::new().await.unwrap_or_else(|_| {
+                    panic!("Failed to create WebFontCache")
+                })
+            })
+        } else {
+            // No runtime available, create one temporarily
+            tokio::runtime::Runtime::new()
+                .expect("Failed to create tokio runtime")
+                .block_on(async {
+                    Self::new().await.unwrap_or_else(|_| {
+                        panic!("Failed to create WebFontCache")
+                    })
+                })
+        }
     }
 }

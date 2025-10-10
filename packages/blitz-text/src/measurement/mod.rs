@@ -72,22 +72,61 @@ pub struct TextMeasurer {
 impl TextMeasurer {
     /// Create a new TextMeasurer with default settings
     pub fn new() -> Self {
-        Self::with_cache_size(10000).unwrap_or_else(|_| {
+        use tokio::runtime::Handle;
+        
+        // Try to use current runtime if available
+        let result = if let Ok(handle) = Handle::try_current() {
+            handle.block_on(async {
+                Self::with_cache_size(10000).await
+            })
+        } else {
+            // No runtime available, create one temporarily
+            tokio::runtime::Runtime::new()
+                .expect("Failed to create tokio runtime")
+                .block_on(async {
+                    Self::with_cache_size(10000).await
+                })
+        };
+        
+        result.unwrap_or_else(|_| {
             // Fallback to basic implementation without goldylox if initialization fails
             let font_system = Arc::new(ArcSwap::new(Arc::new(FontSystem::new())));
-            let cache_manager = Arc::new(ArcSwap::new(Arc::new(
-                UnifiedCacheManager::new().unwrap_or_else(|_| {
-                    // If goldylox cache creation fails, create fallback with default implementations
-                    UnifiedCacheManager {
-                        measurement_cache: CacheManager::new().unwrap_or_else(|_| {
-                            panic!("Failed to create measurement cache manager")
-                        }),
-                        font_metrics_cache: FontMetricsCache::default(),
-                        bidi_cache: BidiCache::default(),
-                        features_cache: FeaturesCache::default(),
-                    }
-                })
-            )));
+            let cache_manager = Arc::new(ArcSwap::new(Arc::new({
+                use tokio::runtime::Handle;
+                
+                // Try to use current runtime if available
+                if let Ok(handle) = Handle::try_current() {
+                    handle.block_on(async {
+                        UnifiedCacheManager::new().await.unwrap_or_else(|_| {
+                            // If goldylox cache creation fails, create fallback with default implementations
+                            UnifiedCacheManager {
+                                measurement_cache: CacheManager::new().unwrap_or_else(|_| {
+                                    panic!("Failed to create measurement cache manager")
+                                }),
+                                font_metrics_cache: FontMetricsCache::default(),
+                                bidi_cache: BidiCache::default(),
+                                features_cache: FeaturesCache::default(),
+                            }
+                        })
+                    })
+                } else {
+                    // No runtime available, create one temporarily
+                    tokio::runtime::Runtime::new()
+                        .expect("Failed to create tokio runtime")
+                        .block_on(async {
+                            UnifiedCacheManager::new().await.unwrap_or_else(|_| {
+                                UnifiedCacheManager {
+                                    measurement_cache: CacheManager::new().unwrap_or_else(|_| {
+                                        panic!("Failed to create measurement cache manager")
+                                    }),
+                                    font_metrics_cache: FontMetricsCache::default(),
+                                    bidi_cache: BidiCache::default(),
+                                    features_cache: FeaturesCache::default(),
+                                }
+                            })
+                        })
+                }
+            })));
             let stats = Arc::new(MeasurementStatsInner::new());
             
             Self {
@@ -100,9 +139,9 @@ impl TextMeasurer {
     }
 
     /// Create a new TextMeasurer with specified cache size
-    pub fn with_cache_size(max_cache_size: usize) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn with_cache_size(max_cache_size: usize) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         let font_system = Arc::new(ArcSwap::new(Arc::new(FontSystem::new())));
-        let cache_manager = Arc::new(ArcSwap::new(Arc::new(UnifiedCacheManager::new()?)));
+        let cache_manager = Arc::new(ArcSwap::new(Arc::new(UnifiedCacheManager::new().await?)));
         let stats = Arc::new(MeasurementStatsInner::new());
 
         Ok(Self {
@@ -114,9 +153,9 @@ impl TextMeasurer {
     }
 
     /// Create a new TextMeasurer with a pre-configured FontSystem
-    pub fn with_font_system(font_system: FontSystem) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn with_font_system(font_system: FontSystem) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         let font_system_arc = Arc::new(ArcSwap::new(Arc::new(font_system)));
-        let cache_manager = Arc::new(ArcSwap::new(Arc::new(UnifiedCacheManager::new()?)));
+        let cache_manager = Arc::new(ArcSwap::new(Arc::new(UnifiedCacheManager::new().await?)));
         let stats = Arc::new(MeasurementStatsInner::new());
 
         Ok(Self {
@@ -304,10 +343,10 @@ impl TextMeasurer {
     }
 
     /// Clear all caches (useful for memory management)
-    pub fn clear_caches(&self) {
+    pub async fn clear_caches(&self) {
         // Create new cache manager and atomically swap it in
         // Old cache will be dropped when no longer referenced (Arc refcount)
-        if let Ok(new_cache_manager) = UnifiedCacheManager::new() {
+        if let Ok(new_cache_manager) = UnifiedCacheManager::new().await {
             self.cache_manager.store(Arc::new(new_cache_manager));
         }
     }

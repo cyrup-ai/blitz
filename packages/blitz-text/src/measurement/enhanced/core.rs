@@ -98,12 +98,12 @@ impl EnhancedMeasurementCore {
 }
 
 impl EnhancedMeasurementCore {
-    pub fn new() -> Result<Self, Box<dyn std::error::Error>> {
+    pub async fn new() -> Result<Self, Box<dyn std::error::Error>> {
         // Get global Goldylox cache (singleton)
         let cache = (*crate::cache::get_text_measurement_cache()).clone();
         
         // Create unified cache manager for font metrics, bidi, features
-        let unified_cache = UnifiedCacheManager::new()
+        let unified_cache = UnifiedCacheManager::new().await
             .map_err(|e| -> Box<dyn std::error::Error> {
                 Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
             })?;
@@ -113,7 +113,7 @@ impl EnhancedMeasurementCore {
         Ok(Self { cache, unified_cache })
     }
 
-    pub fn measure_text(
+    pub async fn measure_text(
         &self,
         request: &MeasurementRequest,
     ) -> Result<TextMeasurement, MeasurementError> {
@@ -126,7 +126,7 @@ impl EnhancedMeasurementCore {
         let string_key = Self::key_to_string(&key);
 
         // Check cache
-        if let Some(cached) = self.get(&string_key) {
+        if let Some(cached) = self.get(&string_key).await {
             CACHE_HITS.fetch_add(1, Ordering::Relaxed);
             return Ok(cached);
         }
@@ -146,17 +146,17 @@ impl EnhancedMeasurementCore {
         )?;
 
         // Store in Goldylox cache (lock-free put)
-        self.put(string_key, measurement.clone());
+        self.put(string_key, measurement.clone()).await;
 
         Ok(measurement)
     }
 
-    fn get(&self, key: &str) -> Option<TextMeasurement> {
-        self.cache.get(&key.to_string())
+    async fn get(&self, key: &str) -> Option<TextMeasurement> {
+        self.cache.get(&key.to_string()).await
     }
 
-    fn put(&self, key: String, value: TextMeasurement) {
-        if let Err(e) = self.cache.put(key, value) {
+    async fn put(&self, key: String, value: TextMeasurement) {
+        if let Err(e) = self.cache.put(key, value).await {
             eprintln!("Warning: Failed to cache measurement in Goldylox: {}", e);
         }
     }
@@ -182,14 +182,29 @@ impl EnhancedMeasurementCore {
         })
     }
 
-    pub fn clear_cache(&self) -> Result<(), Box<dyn std::error::Error>> {
-        self.cache.clear().map_err(|e| Box::new(e) as Box<dyn std::error::Error>)
+    pub async fn clear_cache(&self) -> Result<(), Box<dyn std::error::Error>> {
+        self.cache.clear().await.map_err(|e| Box::new(e) as Box<dyn std::error::Error>)
     }
 }
 
 impl Default for EnhancedMeasurementCore {
     fn default() -> Self {
-        Self::new().expect("Failed to create EnhancedMeasurementCore")
+        // Since new() is async and Default can't be async, we use a blocking approach
+        use tokio::runtime::Handle;
+        
+        // Try to use current runtime if available
+        if let Ok(handle) = Handle::try_current() {
+            handle.block_on(async {
+                Self::new().await.expect("Failed to create EnhancedMeasurementCore")
+            })
+        } else {
+            // No runtime available, create one temporarily
+            tokio::runtime::Runtime::new()
+                .expect("Failed to create tokio runtime")
+                .block_on(async {
+                    Self::new().await.expect("Failed to create EnhancedMeasurementCore")
+                })
+        }
     }
 }
 
@@ -205,8 +220,8 @@ pub struct EnhancedTextMeasurer {
 }
 
 impl EnhancedTextMeasurer {
-    pub fn new() -> Result<Self, Box<dyn std::error::Error>> {
-        let core = EnhancedMeasurementCore::new()?;
+    pub async fn new() -> Result<Self, Box<dyn std::error::Error>> {
+        let core = EnhancedMeasurementCore::new().await?;
         let font_system = cosmyc_text::FontSystem::new();
         let default_metrics = cosmyc_text::Metrics::new(16.0, 1.0);
         let default_shaping = cosmyc_text::Shaping::Advanced;
@@ -224,19 +239,19 @@ impl EnhancedTextMeasurer {
         })
     }
 
-    pub fn measure_text(
+    pub async fn measure_text(
         &self,
         request: &MeasurementRequest,
     ) -> Result<TextMeasurement, MeasurementError> {
-        self.core.measure_text(request)
+        self.core.measure_text(request).await
     }
 
     pub fn get_font_metrics(&self, font_id: fontdb::ID, size: f32) -> Option<FontMetrics> {
         self.core.get_font_metrics(font_id, size)
     }
 
-    pub fn clear_cache(&self) -> Result<(), Box<dyn std::error::Error>> {
-        self.core.clear_cache()
+    pub async fn clear_cache(&self) -> Result<(), Box<dyn std::error::Error>> {
+        self.core.clear_cache().await
     }
 
     /// Get measurement statistics
@@ -274,6 +289,20 @@ impl EnhancedTextMeasurer {
 
 impl Default for EnhancedTextMeasurer {
     fn default() -> Self {
-        Self::new().expect("Failed to create EnhancedTextMeasurer")
+        use tokio::runtime::Handle;
+        
+        // Try to use current runtime if available
+        if let Ok(handle) = Handle::try_current() {
+            handle.block_on(async {
+                Self::new().await.expect("Failed to create EnhancedTextMeasurer")
+            })
+        } else {
+            // No runtime available, create one temporarily
+            tokio::runtime::Runtime::new()
+                .expect("Failed to create tokio runtime")
+                .block_on(async {
+                    Self::new().await.expect("Failed to create EnhancedTextMeasurer")
+                })
+        }
     }
 }

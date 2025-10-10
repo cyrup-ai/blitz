@@ -45,13 +45,13 @@ impl UnifiedTextSystem {
     }
 
     /// Measure, prepare, and render text in one operation
-    pub fn measure_prepare_and_render(
+    pub async fn measure_prepare_and_render(
         &mut self,
         device: &Device,
         queue: &Queue,
         render_pass: &mut RenderPass<'_>,
         text: &str,
-        attrs: Attrs,
+        attrs: Attrs<'_>,
         position: (f32, f32),
         scale: f32,
         bounds: TextBounds,
@@ -70,7 +70,7 @@ impl UnifiedTextSystem {
             default_color,
             max_width,
             max_height,
-        )?;
+        ).await?;
 
         self.render_prepared(&prepared, render_pass)
     }

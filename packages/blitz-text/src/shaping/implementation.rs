@@ -44,10 +44,10 @@ impl TextShaper {
     }
 
     /// Shape text with full internationalization support
-    pub fn shape_text(
+    pub async fn shape_text(
         &mut self,
         text: &str,
-        attrs: Attrs,
+        attrs: Attrs<'_>,
         max_width: Option<f32>,
     ) -> Result<Arc<ShapedText>, ShapingError> {
         if text.is_empty() {
@@ -67,7 +67,7 @@ impl TextShaper {
 
         // Check cache first
         let string_key = Self::key_to_string(&cache_key);
-        if let Some(cached_text) = self.cache.get(&string_key) {
+        if let Some(cached_text) = self.cache.get(&string_key).await {
             return Ok(Arc::new(cached_text));
         }
 
@@ -88,7 +88,7 @@ impl TextShaper {
         // Store in cache
         let string_key = Self::key_to_string(&cache_key);
         self.cache
-            .put(string_key, shaped_text.clone())
+            .put(string_key, shaped_text.clone()).await
             .map_err(|e| ShapingError::CacheOperationError(format!("{:?}", e)))?;
 
         Ok(Arc::new(shaped_text))
@@ -102,9 +102,9 @@ impl TextShaper {
     }
 
     /// Clear the shaping cache
-    pub fn clear_cache(&self) -> Result<(), ShapingError> {
+    pub async fn clear_cache(&self) -> Result<(), ShapingError> {
         self.cache
-            .clear()
+            .clear().await
             .map_err(|e| ShapingError::CacheOperationError(format!("{:?}", e)))
     }
 

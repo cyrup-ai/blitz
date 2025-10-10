@@ -175,9 +175,9 @@ impl FontManagerBuilder {
     }
 
     /// Build the FontManager with the specified configuration
-    pub fn build(self) -> Result<FontManager, FontError> {
+    pub async fn build(self) -> Result<FontManager, FontError> {
         self.validate()?;
-        FontManager::with_config(self)
+        FontManager::with_config(self).await
     }
 }
 

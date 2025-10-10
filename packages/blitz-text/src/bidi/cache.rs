@@ -59,7 +59,7 @@ pub struct BidiCache {
 }
 
 impl BidiCache {
-    pub fn new() -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn new() -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         use std::sync::atomic::{AtomicU64, Ordering};
         static CACHE_COUNTER: AtomicU64 = AtomicU64::new(0);
         let cache_id = format!("bidi_cache_{}", CACHE_COUNTER.fetch_add(1, Ordering::Relaxed));
@@ -73,28 +73,28 @@ impl BidiCache {
             .compression_level(4)
             .background_worker_threads(1)
             .cache_id(&cache_id)
-            .build()?;
+            .build().await?;
 
         Ok(Self { cache })
     }
 
-    pub fn get(&self, text: &str) -> Option<ProcessedBidi> {
-        self.cache.get(&text.to_string())
+    pub async fn get(&self, text: &str) -> Option<ProcessedBidi> {
+        self.cache.get(&text.to_string()).await
     }
 
-    pub fn put(
+    pub async fn put(
         &self,
         text: String,
         value: ProcessedBidi,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         self.cache
-            .put(text, value)
+            .put(text, value).await
             .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
     }
 
-    pub fn clear(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn clear(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         self.cache
-            .clear()
+            .clear().await
             .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
     }
 
@@ -119,19 +119,26 @@ impl BidiCache {
 
 impl Default for BidiCache {
     fn default() -> Self {
-        Self::new().unwrap_or_else(|_| {
-            // Fallback: create a minimal cache that always works
-            use std::sync::atomic::{AtomicU64, Ordering};
-            static FALLBACK_COUNTER: AtomicU64 = AtomicU64::new(0);
-            let fallback_cache_id = format!("bidi_cache_fallback_{}", FALLBACK_COUNTER.fetch_add(1, Ordering::Relaxed));
-            
-            BidiCache {
-                cache: GoldyloxBuilder::<String, ProcessedBidi>::new()
-                    .cache_id(&fallback_cache_id)
-                    .build()
-                    .unwrap(),
-            }
-        })
+        // Since new() is async and Default can't be async, we use a blocking approach
+        use tokio::runtime::Handle;
+        
+        // Try to use current runtime if available
+        if let Ok(handle) = Handle::try_current() {
+            handle.block_on(async {
+                Self::new().await.unwrap_or_else(|_| {
+                    panic!("Failed to create BidiCache")
+                })
+            })
+        } else {
+            // No runtime available, create one temporarily
+            tokio::runtime::Runtime::new()
+                .expect("Failed to create tokio runtime")
+                .block_on(async {
+                    Self::new().await.unwrap_or_else(|_| {
+                        panic!("Failed to create BidiCache")
+                    })
+                })
+        }
     }
 }
 

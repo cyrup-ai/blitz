@@ -851,36 +851,22 @@ struct TextShadowParams {
     color: peniko::Color,
 }
 
+// TODO: This function needs to be updated for async shape_text API
+// Commented out temporarily as it's unused (marked #[allow(dead_code)])
+// and requires refactoring for async/await with thread-local storage
+/*
 /// Advanced text shaping interface using blitz-text with production error handling
 /// Primary text shaping pipeline for all text rendering operations
 #[allow(dead_code)]
-pub(crate) fn shape_text_advanced(
-    text: &str,
-    attrs: Attrs,
+pub(crate) async fn shape_text_advanced<'a>(
+    text: &'a str,
+    attrs: Attrs<'a>,
     max_width: Option<f32>,
 ) -> Result<Arc<blitz_text::shaping::ShapedText>, blitz_text::ShapingError> {
-    ensure_text_shaper_initialized();
-    TEXT_SHAPER.with(|shaper| {
-        let mut shaper = shaper.borrow_mut();
-        match shaper.as_mut() {
-            Some(shaper) => {
-                shaper.shape_text(text, attrs, max_width).or_else(|_e| {
-                    #[cfg(feature = "tracing")]
-                    tracing::warn!("Text shaping failed: {:?}, attempting graceful fallback", _e);
-
-                    // Attempt fallback with simplified attributes
-                    let fallback_attrs = Attrs::new().family(blitz_text::Family::SansSerif);
-                    shaper.shape_text(text, fallback_attrs, max_width)
-                })
-            }
-            None => {
-                #[cfg(feature = "tracing")]
-                tracing::error!("TextShaper not initialized, cannot shape text");
-                Err(blitz_text::ShapingError::FontSystemError)
-            }
-        }
-    })
+    // Requires refactoring to work with async shape_text and thread-local storage
+    unimplemented!("Needs async refactor")
 }
+*/
 
 /// Clear text shaper caches (for memory management)
 #[allow(dead_code)]

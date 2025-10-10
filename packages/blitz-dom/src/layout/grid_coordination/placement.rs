@@ -10,7 +10,7 @@ impl GridLayoutCoordinator {
     /// Enhanced auto-placement implementation with CSS order processing
     pub fn auto_place_items<Tree>(
         &self,
-        subgrid_id: NodeId,
+        _subgrid_id: NodeId,
         placement_state: &mut AutoPlacementState,
         tree: &Tree,
     ) -> Result<Vec<ItemPlacement>, GridPreprocessingError>

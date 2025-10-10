@@ -33,20 +33,20 @@ impl CacheManager {
     }
 
     /// Get cached measurement result
-    pub fn get(&self, key: &MeasurementCacheKey) -> Option<TextMeasurement> {
+    pub async fn get(&self, key: &MeasurementCacheKey) -> Option<TextMeasurement> {
         let string_key = Self::key_to_string(key);
-        self.cache.get(&string_key)
+        self.cache.get(&string_key).await
     }
 
     /// Store measurement result in cache
-    pub fn put(
+    pub async fn put(
         &self,
         key: MeasurementCacheKey,
         value: TextMeasurement,
     ) -> Result<(), Box<dyn std::error::Error>> {
         let string_key = Self::key_to_string(&key);
         self.cache
-            .put(string_key, value)
+            .put(string_key, value).await
             .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)
     }
 
@@ -56,9 +56,9 @@ impl CacheManager {
     }
 
     /// Clear all cached measurements
-    pub fn clear(&self) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn clear(&self) -> Result<(), Box<dyn std::error::Error>> {
         self.cache
-            .clear()
+            .clear().await
             .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)
     }
 
@@ -140,12 +140,12 @@ impl CacheManager {
     }
 
     /// Create cache manager with memory limit
-    pub fn with_memory_limit(
+    pub async fn with_memory_limit(
         memory_mb: u64,
     ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         let cache = GoldyloxBuilder::<String, TextMeasurement>::new()
             .hot_tier_memory_limit_mb(memory_mb as u32)
-            .build()?;
+            .build().await?;
         Ok(Self { cache })
     }
 
@@ -190,25 +190,54 @@ impl CacheManager {
 
 impl Default for CacheManager {
     fn default() -> Self {
-        // Use a single robust goldylox configuration
-        let cache = GoldyloxBuilder::<String, TextMeasurement>::new()
-            .hot_tier_max_entries(2000)
-            .hot_tier_memory_limit_mb(32)
-            .warm_tier_max_entries(8000)
-            .warm_tier_max_memory_bytes(64 * 1024 * 1024) // 64MB
-            .cold_tier_max_size_bytes(128 * 1024 * 1024) // 128MB
-            .compression_level(4)
-            .background_worker_threads(2)
-            .cache_id("measurement_cache_default")
-            .build()
-            .unwrap_or_else(|_| {
-                // Last resort: minimal cache configuration
-                GoldyloxBuilder::<String, TextMeasurement>::new()
-                    .cache_id("measurement_cache_minimal")
-                    .build()
-                    .unwrap()
-            });
-        Self { cache }
+        // Since build() is async and Default can't be async, we use a blocking approach
+        use tokio::runtime::Handle;
+        
+        // Try to use current runtime if available
+        if let Ok(handle) = Handle::try_current() {
+            handle.block_on(async {
+                let cache = GoldyloxBuilder::<String, TextMeasurement>::new()
+                    .hot_tier_max_entries(2000)
+                    .hot_tier_memory_limit_mb(32)
+                    .warm_tier_max_entries(8000)
+                    .warm_tier_max_memory_bytes(64 * 1024 * 1024) // 64MB
+                    .cold_tier_max_size_bytes(128 * 1024 * 1024) // 128MB
+                    .compression_level(4)
+                    .background_worker_threads(2)
+                    .cache_id("measurement_cache_default")
+                    .build().await
+                    .unwrap_or_else(|_| {
+                        // Last resort: minimal cache configuration
+                        tokio::runtime::Runtime::new()
+                            .expect("Failed to create tokio runtime")
+                            .block_on(async {
+                                GoldyloxBuilder::<String, TextMeasurement>::new()
+                                    .cache_id("measurement_cache_minimal")
+                                    .build().await
+                                    .unwrap()
+                            })
+                    });
+                Self { cache }
+            })
+        } else {
+            // No runtime available, create one temporarily
+            tokio::runtime::Runtime::new()
+                .expect("Failed to create tokio runtime")
+                .block_on(async {
+                    let cache = GoldyloxBuilder::<String, TextMeasurement>::new()
+                        .hot_tier_max_entries(2000)
+                        .hot_tier_memory_limit_mb(32)
+                        .warm_tier_max_entries(8000)
+                        .warm_tier_max_memory_bytes(64 * 1024 * 1024) // 64MB
+                        .cold_tier_max_size_bytes(128 * 1024 * 1024) // 128MB
+                        .compression_level(4)
+                        .background_worker_threads(2)
+                        .cache_id("measurement_cache_default")
+                        .build().await
+                        .expect("Failed to build cache");
+                    Self { cache }
+                })
+        }
     }
 }
 
@@ -259,18 +288,18 @@ pub struct UnifiedCacheManager {
 }
 
 impl UnifiedCacheManager {
-    pub fn new() -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn new() -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         Ok(Self {
             measurement_cache: CacheManager::new().map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { 
                 Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
             })?,
-            font_metrics_cache: crate::measurement::enhanced::font_metrics::FontMetricsCache::new().map_err(|e| -> Box<dyn std::error::Error + Send + Sync> {
+            font_metrics_cache: crate::measurement::enhanced::font_metrics::FontMetricsCache::new().await.map_err(|e| -> Box<dyn std::error::Error + Send + Sync> {
                 Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
             })?,
-            bidi_cache: crate::bidi::cache::BidiCache::new().map_err(|e| -> Box<dyn std::error::Error + Send + Sync> {
+            bidi_cache: crate::bidi::cache::BidiCache::new().await.map_err(|e| -> Box<dyn std::error::Error + Send + Sync> {
                 Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
             })?,
-            features_cache: crate::features::cache::FeaturesCache::new().map_err(|e| -> Box<dyn std::error::Error + Send + Sync> {
+            features_cache: crate::features::cache::FeaturesCache::new().await.map_err(|e| -> Box<dyn std::error::Error + Send + Sync> {
                 Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
             })?,
         })

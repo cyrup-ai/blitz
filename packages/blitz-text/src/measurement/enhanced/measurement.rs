@@ -19,10 +19,10 @@ impl EnhancedTextMeasurer {
     /// Measure text with comprehensive cosmyc-text integration
     /// Zero allocation through buffer reuse and optimized cache patterns
     #[inline]
-    pub fn measure_text_enhanced(
+    pub async fn measure_text_enhanced(
         &mut self,
         text: &str,
-        attrs: &Attrs,
+        attrs: &Attrs<'_>,
         max_width: Option<f32>,
         max_height: Option<f32>,
         wrap: Option<Wrap>,
@@ -88,7 +88,7 @@ impl EnhancedTextMeasurer {
         let enhanced_font_system = Rc::new(RefCell::new(EnhancedFontSystem::default()));
         let layout_analyzer = LayoutAnalyzer::new(&enhanced_font_system);
         let glyph_extractor = GlyphExtractor::new();
-        let font_metrics_calc = FontMetricsCalculator::new()?;
+        let font_metrics_calc = FontMetricsCalculator::new().await?;
         let baseline_calc = BaselineCalculator::new();
         let bounds_calc = BoundsCalculator::new();
 

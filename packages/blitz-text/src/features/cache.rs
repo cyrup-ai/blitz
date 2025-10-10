@@ -72,7 +72,7 @@ pub struct FeaturesCache {
 }
 
 impl FeaturesCache {
-    pub fn new() -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn new() -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         use std::sync::atomic::{AtomicU64, Ordering};
         static CACHE_COUNTER: AtomicU64 = AtomicU64::new(0);
         let cache_id = format!("features_cache_{}", CACHE_COUNTER.fetch_add(1, Ordering::Relaxed));
@@ -86,17 +86,17 @@ impl FeaturesCache {
             .compression_level(5)
             .background_worker_threads(1)
             .cache_id(&cache_id)
-            .build()?;
+            .build().await?;
 
         Ok(Self { cache })
     }
 
-    pub fn get(&self, feature_name: &str, context: &str) -> Option<Vec<String>> {
+    pub async fn get(&self, feature_name: &str, context: &str) -> Option<Vec<String>> {
         let key = format!("{}:{}", feature_name, context);
-        self.cache.get(&key).map(|v| v.features)
+        self.cache.get(&key).await.map(|v| v.features)
     }
 
-    pub fn put(
+    pub async fn put(
         &self,
         feature_name: String,
         context: String,
@@ -108,13 +108,13 @@ impl FeaturesCache {
             cached_at: std::time::Instant::now(),
         };
         self.cache
-            .put(key, value)
+            .put(key, value).await
             .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)
     }
 
-    pub fn clear(&self) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn clear(&self) -> Result<(), Box<dyn std::error::Error>> {
         self.cache
-            .clear()
+            .clear().await
             .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)
     }
 
@@ -139,18 +139,26 @@ impl FeaturesCache {
 
 impl Default for FeaturesCache {
     fn default() -> Self {
-        Self::new().unwrap_or_else(|_| {
-            // Fallback: create a minimal cache that always works
-            use std::sync::atomic::{AtomicU64, Ordering};
-            static FALLBACK_COUNTER: AtomicU64 = AtomicU64::new(0);
-            let fallback_cache_id = format!("features_cache_fallback_{}", FALLBACK_COUNTER.fetch_add(1, Ordering::Relaxed));
-            
-            FeaturesCache {
-                cache: GoldyloxBuilder::<String, FeaturesValue>::new()
-                    .cache_id(&fallback_cache_id)
-                    .build()
-                    .unwrap(),
-            }
-        })
+        // Since new() is async and Default can't be async, we use a blocking approach
+        // This is only used in fallback scenarios, so the blocking is acceptable
+        use tokio::runtime::Handle;
+        
+        // Try to use current runtime if available
+        if let Ok(handle) = Handle::try_current() {
+            handle.block_on(async {
+                Self::new().await.unwrap_or_else(|_| {
+                    panic!("Failed to create FeaturesCache - goldylox initialization failed")
+                })
+            })
+        } else {
+            // No runtime available, create one temporarily
+            tokio::runtime::Runtime::new()
+                .expect("Failed to create tokio runtime")
+                .block_on(async {
+                    Self::new().await.unwrap_or_else(|_| {
+                        panic!("Failed to create FeaturesCache - goldylox initialization failed")
+                    })
+                })
+        }
     }
 }

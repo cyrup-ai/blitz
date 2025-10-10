@@ -137,10 +137,12 @@ pub fn apply_masonry_layout(
     }
 
     // Phase 5.7: Apply baseline alignment adjustments
+    let container_size = inputs.known_dimensions;
     let baseline_adjustments = baseline_alignment::calculate_baseline_adjustments(
         tree,
         &placed_items,
         masonry_axis,
+        container_size,
     )?;
 
     // Apply baseline adjustments to masonry_axis_position

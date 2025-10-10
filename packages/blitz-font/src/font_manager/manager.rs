@@ -48,17 +48,17 @@ pub struct FontManager {
 
 impl FontManager {
     /// Create a new FontManager instance with optimal defaults
-    pub fn new() -> Result<Self, FontError> {
-        Self::with_config(crate::FontManagerBuilder::new())
+    pub async fn new() -> Result<Self, FontError> {
+        Self::with_config(crate::FontManagerBuilder::new()).await
     }
 
     /// Create FontManager with custom configuration
-    pub fn with_config(config: crate::FontManagerBuilder) -> Result<Self, FontError> {
+    pub async fn with_config(config: crate::FontManagerBuilder) -> Result<Self, FontError> {
         let font_system = Arc::new(Mutex::new(glyphon::cosmyc_text::FontSystem::new()));
         let registry_manager = RegistryManager::new();
 
         #[cfg(feature = "web-fonts")]
-        let web_font_loader = WebFontLoader::new()?;
+        let web_font_loader = WebFontLoader::new().await?;
 
         let (font_load_tx, font_load_rx) = tokio::sync::mpsc::unbounded_channel();
 
@@ -163,29 +163,64 @@ impl FontManager {
 
 impl Default for FontManager {
     fn default() -> Self {
-        // Provide a fallback implementation that cannot fail
-        // Create minimal FontManager without system font discovery to avoid potential failures
-        let font_system = Arc::new(Mutex::new(glyphon::cosmyc_text::FontSystem::new()));
-        let registry_manager = RegistryManager::new();
+        use tokio::runtime::Handle;
+        
+        // Try to use current runtime if available
+        if let Ok(handle) = Handle::try_current() {
+            handle.block_on(async {
+                // Provide a fallback implementation that cannot fail
+                // Create minimal FontManager without system font discovery to avoid potential failures
+                let font_system = Arc::new(Mutex::new(glyphon::cosmyc_text::FontSystem::new()));
+                let registry_manager = RegistryManager::new();
 
-        #[cfg(feature = "web-fonts")]
-        let web_font_loader = WebFontLoader::minimal();
+                #[cfg(feature = "web-fonts")]
+                let web_font_loader = WebFontLoader::minimal().await;
 
-        let (font_load_tx, font_load_rx) = tokio::sync::mpsc::unbounded_channel();
+                let (font_load_tx, font_load_rx) = tokio::sync::mpsc::unbounded_channel();
 
-        Self {
-            font_system,
-            registry_manager,
-            font_count: AtomicUsize::new(0),
-            system_fonts_loaded: AtomicBool::new(false),
-            max_cache_size: crate::constants::MAX_FONT_CACHE_SIZE,
-            cache_ttl: std::time::Duration::from_secs(crate::constants::DEFAULT_CACHE_TTL_SECONDS),
+                Self {
+                    font_system,
+                    registry_manager,
+                    font_count: AtomicUsize::new(0),
+                    system_fonts_loaded: AtomicBool::new(false),
+                    max_cache_size: crate::constants::MAX_FONT_CACHE_SIZE,
+                    cache_ttl: std::time::Duration::from_secs(crate::constants::DEFAULT_CACHE_TTL_SECONDS),
 
-            #[cfg(feature = "web-fonts")]
-            web_font_loader,
+                    #[cfg(feature = "web-fonts")]
+                    web_font_loader,
 
-            font_load_tx,
-            font_load_rx: Arc::new(tokio::sync::Mutex::new(font_load_rx)),
+                    font_load_tx,
+                    font_load_rx: Arc::new(tokio::sync::Mutex::new(font_load_rx)),
+                }
+            })
+        } else {
+            // No runtime available, create one temporarily
+            tokio::runtime::Runtime::new()
+                .expect("Failed to create tokio runtime")
+                .block_on(async {
+                    let font_system = Arc::new(Mutex::new(glyphon::cosmyc_text::FontSystem::new()));
+                    let registry_manager = RegistryManager::new();
+
+                    #[cfg(feature = "web-fonts")]
+                    let web_font_loader = WebFontLoader::minimal().await;
+
+                    let (font_load_tx, font_load_rx) = tokio::sync::mpsc::unbounded_channel();
+
+                    Self {
+                        font_system,
+                        registry_manager,
+                        font_count: AtomicUsize::new(0),
+                        system_fonts_loaded: AtomicBool::new(false),
+                        max_cache_size: crate::constants::MAX_FONT_CACHE_SIZE,
+                        cache_ttl: std::time::Duration::from_secs(crate::constants::DEFAULT_CACHE_TTL_SECONDS),
+
+                        #[cfg(feature = "web-fonts")]
+                        web_font_loader,
+
+                        font_load_tx,
+                        font_load_rx: Arc::new(tokio::sync::Mutex::new(font_load_rx)),
+                    }
+                })
         }
     }
 }

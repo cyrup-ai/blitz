@@ -105,8 +105,8 @@ impl std::fmt::Debug for BlitzFontMetricsProvider {
 }
 
 impl BlitzFontMetricsProvider {
-    fn new() -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
-        let font_metrics_calculator = FontMetricsCalculator::new()?;
+    async fn new() -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+        let font_metrics_calculator = FontMetricsCalculator::new().await?;
         let font_system = FontSystem::new_with_fonts(std::iter::empty());
         Ok(Self {
             font_metrics_calculator,
@@ -117,20 +117,43 @@ impl BlitzFontMetricsProvider {
 
 impl Default for BlitzFontMetricsProvider {
     fn default() -> Self {
-        Self::new().unwrap_or_else(|_| {
-            // Fallback: Use FontMetricsCalculator default which has HashMap fallback
-            // and create a minimal FontSystem with embedded fallback font
-            let font_metrics_calculator = FontMetricsCalculator::default();
-            let mut font_system = FontSystem::new_with_fonts(std::iter::empty());
-            
-            // Ensure embedded fallback font is loaded for basic text rendering
-            let _ = ensure_embedded_fallback(&mut font_system);
-            
-            Self {
-                font_metrics_calculator,
-                font_system: std::sync::Mutex::new(font_system),
-            }
-        })
+        use tokio::runtime::Handle;
+        
+        // Try to use current runtime if available
+        if let Ok(handle) = Handle::try_current() {
+            handle.block_on(async {
+                Self::new().await.unwrap_or_else(|_| {
+                    // Fallback: Use FontMetricsCalculator default which has HashMap fallback
+                    // and create a minimal FontSystem with embedded fallback font
+                    let font_metrics_calculator = FontMetricsCalculator::default();
+                    let mut font_system = FontSystem::new_with_fonts(std::iter::empty());
+                    
+                    // Ensure embedded fallback font is loaded for basic text rendering
+                    let _ = ensure_embedded_fallback(&mut font_system);
+                    
+                    Self {
+                        font_metrics_calculator,
+                        font_system: std::sync::Mutex::new(font_system),
+                    }
+                })
+            })
+        } else {
+            // No runtime available, create one temporarily
+            tokio::runtime::Runtime::new()
+                .expect("Failed to create tokio runtime")
+                .block_on(async {
+                    Self::new().await.unwrap_or_else(|_| {
+                        let font_metrics_calculator = FontMetricsCalculator::default();
+                        let mut font_system = FontSystem::new_with_fonts(std::iter::empty());
+                        let _ = ensure_embedded_fallback(&mut font_system);
+                        
+                        Self {
+                            font_metrics_calculator,
+                            font_system: std::sync::Mutex::new(font_system),
+                        }
+                    })
+                })
+        }
     }
 }
 
@@ -165,7 +188,21 @@ impl FontMetricsProvider for BlitzFontMetricsProvider {
 
         // Query blitz-text font metrics calculator if we have a valid font ID
         if let Some(font_id) = font_id {
-            if let Some(blitz_metrics) = self.font_metrics_calculator.calculate(font_id, font_size)
+            // Use tokio runtime to call async calculate method
+            use tokio::runtime::Handle;
+            let blitz_metrics_opt = if let Ok(handle) = Handle::try_current() {
+                handle.block_on(async {
+                    self.font_metrics_calculator.calculate(font_id, font_size).await
+                })
+            } else {
+                tokio::runtime::Runtime::new()
+                    .expect("Failed to create tokio runtime")
+                    .block_on(async {
+                        self.font_metrics_calculator.calculate(font_id, font_size).await
+                    })
+            };
+            
+            if let Some(blitz_metrics) = blitz_metrics_opt
             {
                 // Convert blitz-text FontMetrics to style::font_metrics::FontMetrics
                 style::font_metrics::FontMetrics {
@@ -535,7 +572,7 @@ impl BaseDocument {
 
     /// Initialize text system with GPU context - must be called before using text system methods
     /// This replaces the removed headless initialization pattern with proper GPU context usage
-    pub fn initialize_text_system_with_gpu_context(
+    pub async fn initialize_text_system_with_gpu_context(
         &self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
@@ -545,6 +582,7 @@ impl BaseDocument {
     ) -> Result<(), blitz_text::text_system::config::TextSystemError> {
         // Use the singleton for initialization
         crate::TextSystemSingleton::initialize_once(device, queue, format, multisample, depth_stencil)
+            .await
             .map_err(|e| match e {
                 crate::TextSystemSingletonError::InitializationFailed(msg) => {
                     blitz_text::text_system::config::TextSystemError::Configuration(msg)

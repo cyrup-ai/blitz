@@ -49,10 +49,10 @@ pub struct UnifiedTextSystem {
 
 impl UnifiedTextSystem {
     /// Measure text with given attributes and constraints
-    pub fn measure_text(
+    pub async fn measure_text(
         &self,
         text: &str,
-        attrs: Attrs,
+        attrs: Attrs<'_>,
         max_width: Option<f32>,
         _max_height: Option<f32>,
     ) -> TextSystemResult<TextMeasurement> {
@@ -82,7 +82,7 @@ impl UnifiedTextSystem {
             font_family,
         };
         self.text_measurer
-            .measure_text(&request)
+            .measure_text(&request).await
             .map_err(|e| TextSystemError::Measurement(e))
     }
 
@@ -98,7 +98,7 @@ impl UnifiedTextSystem {
     }
 
     /// Create a new unified text system
-    pub fn new(
+    pub async fn new(
         device: &Device,
         queue: &Queue,
         format: TextureFormat,
@@ -108,13 +108,13 @@ impl UnifiedTextSystem {
         let font_system = ThreadLocal::new();
 
         // Create measurement components
-        let text_measurer = EnhancedTextMeasurer::new()?;
+        let text_measurer = EnhancedTextMeasurer::new().await?;
 
         // Create cosmyc-text integration
         let cosmyc_integration = CosmicTextIntegration::new();
 
         // Create GPU components
-        let gpu_cache = EnhancedGpuCache::new(device)?;
+        let gpu_cache = EnhancedGpuCache::new(device).await?;
         let glyphon_cache = gpu_cache.glyphon_cache();
 
         let mut text_atlas = EnhancedTextAtlas::new(device, queue, glyphon_cache, format);
@@ -149,7 +149,7 @@ impl UnifiedTextSystem {
     }
 
     /// Create a new unified text system with custom configuration
-    pub fn with_config(
+    pub async fn with_config(
         device: &Device,
         queue: &Queue,
         format: TextureFormat,
@@ -157,7 +157,7 @@ impl UnifiedTextSystem {
         depth_stencil: Option<DepthStencilState>,
         config: UnifiedTextConfig,
     ) -> TextSystemResult<Self> {
-        let mut system = Self::new(device, queue, format, multisample, depth_stencil)?;
+        let mut system = Self::new(device, queue, format, multisample, depth_stencil).await?;
         system.config = config;
         Ok(system)
     }

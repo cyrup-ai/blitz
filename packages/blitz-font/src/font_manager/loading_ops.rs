@@ -136,7 +136,7 @@ impl FontLoadingOps {
         let cache_manager = CacheManager::new(
             crate::constants::MAX_FONT_CACHE_SIZE,
             Duration::from_secs(crate::constants::DEFAULT_CACHE_TTL_SECONDS),
-        )?;
+        ).await?;
 
         let active_loads = Arc::new(std::sync::atomic::AtomicPtr::new(Box::into_raw(Box::new(
             std::collections::HashMap::new(),
@@ -149,7 +149,7 @@ impl FontLoadingOps {
 
         // Get the loaded font data from the cache
         let cache = cache_manager.get_cache();
-        let entry = cache.get(&url).ok_or_else(|| {
+        let entry = cache.get(&url).await.ok_or_else(|| {
             FontError::LoadFailed("Web font not found in cache after loading".to_string())
         })?;
 

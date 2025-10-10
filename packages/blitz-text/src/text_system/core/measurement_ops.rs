@@ -11,10 +11,10 @@ use crate::text_system::config::TextSystemResult;
 
 impl UnifiedTextSystem {
     /// Measure text with advanced typography features
-    pub fn measure_text_advanced(
+    pub async fn measure_text_advanced(
         &self,
         text: &str,
-        attrs: Attrs,
+        attrs: Attrs<'_>,
         max_width: Option<f32>,
         _max_height: Option<f32>,
     ) -> TextSystemResult<TextMeasurement> {
@@ -50,12 +50,12 @@ impl UnifiedTextSystem {
 
         // Delegate to proper measurement system (uses perform_measurement internally)
         self.text_measurer
-            .measure_text(&request)
+            .measure_text(&request).await
             .map_err(|e| crate::text_system::config::TextSystemError::Measurement(e))
     }
 
     /// Quick measurement for simple text
-    pub fn measure_text_simple(
+    pub async fn measure_text_simple(
         &self,
         text: &str,
         font_size: f32,
@@ -65,11 +65,11 @@ impl UnifiedTextSystem {
         let attrs = Attrs::new().metrics(cosmyc_text::Metrics::new(font_size, font_size * 1.4));
 
         // Delegate to measure_text (not measure_text_advanced)
-        self.measure_text(text, attrs, max_width, None)
+        self.measure_text(text, attrs, max_width, None).await
     }
 
     /// Measure single line of text
-    pub fn measure_line(&self, text: &str, attrs: Attrs) -> TextSystemResult<f32> {
+    pub async fn measure_line(&self, text: &str, attrs: Attrs<'_>) -> TextSystemResult<f32> {
         use crate::measurement::types::measurement_request::TextDirection;
         
         let font_family = Some(match attrs.family {
@@ -96,7 +96,7 @@ impl UnifiedTextSystem {
         };
         let measurement = self
             .text_measurer
-            .measure_text(&request)
+            .measure_text(&request).await
             .map_err(|e| crate::text_system::config::TextSystemError::Measurement(e))?;
         Ok(measurement.content_width)
     }

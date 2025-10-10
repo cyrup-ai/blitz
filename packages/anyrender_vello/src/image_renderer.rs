@@ -124,14 +124,14 @@ impl VelloImageRenderer {
             antialiasing_method: vello::AaConfig::Area,
         };
 
-        self.renderer
+        pollster::block_on(self.renderer
             .render_to_texture(
                 &self.device,
                 &self.queue,
                 self.scene.as_ref().unwrap(),
                 &self.texture_view,
                 &render_params,
-            )
+            ))
             .expect("Got non-Send/Sync error from rendering");
 
         let mut encoder = self

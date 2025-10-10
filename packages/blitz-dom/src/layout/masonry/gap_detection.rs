@@ -14,12 +14,18 @@ pub struct GapOpportunity {
     pub gap_position: f32,
 
     /// Total available space in the gap (masonry axis)
+    /// TODO(TASK21): Use for gap validation to ensure item fits
+    #[allow(dead_code)]
     pub gap_size: f32,
 
     /// Total track size (grid axis) - must match item's normal placement
+    /// TODO(TASK21): Use for track size compatibility check to prevent re-layout
+    #[allow(dead_code)]
     pub track_total_size: f32,
 
     /// Number of tracks spanned by this gap
+    /// TODO(TASK21): Use for span compatibility validation
+    #[allow(dead_code)]
     pub span: usize,
 }
 
@@ -82,7 +88,8 @@ pub fn detect_compatible_gaps(
         }
 
         // Check if this is actually a gap (not the current leading position)
-        if gap_size > item_tolerance {
+        // Use small epsilon for floating-point precision, not item_tolerance
+        if gap_size > 0.1 {
             gaps.push(GapOpportunity {
                 track_index: start_track,
                 gap_position,
