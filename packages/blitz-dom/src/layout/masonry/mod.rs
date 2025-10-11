@@ -136,31 +136,48 @@ pub fn apply_masonry_layout(
         }
     }
 
-    // Phase 5.7: Apply baseline alignment adjustments
+    // Phase 5.7: Layout items first to extract baselines
+    let layout_outputs = layout_output::layout_masonry_items(
+        tree,
+        &placed_items,
+        inputs,
+        masonry_axis,
+        &track_sizes,
+    )?;
+
+    // Phase 5.8: Calculate baseline alignment adjustments using layout outputs
     let container_size = inputs.known_dimensions;
     let baseline_adjustments = baseline_alignment::calculate_baseline_adjustments(
         tree,
         &placed_items,
+        &layout_outputs,  // ✅ Pass layout outputs for baseline extraction
         masonry_axis,
         container_size,
     )?;
 
-    // Apply baseline adjustments to masonry_axis_position
+    // Phase 5.9: Apply baseline adjustments to masonry_axis_position
     for adjustment in baseline_adjustments {
         if let Some((_, grid_area)) = placed_items.get_mut(adjustment.item_index) {
             grid_area.masonry_axis_position += adjustment.position_adjustment;
         }
     }
 
-    // Phase 6: Generate layout output with masonry placements
-    layout_output::generate_masonry_layout_output(
+    // Phase 6: Apply final positions with adjustments
+    layout_output::apply_masonry_positions(
         tree,
-        node_id,
-        inputs,
-        placed_items,
+        &placed_items,
+        &layout_outputs,
         masonry_axis,
         &track_sizes,
-    )
+    );
+
+    // Phase 7: Generate container layout output
+    Ok(layout_output::generate_container_output(
+        &placed_items,
+        masonry_axis,
+        inputs,
+        &track_sizes,
+    ))
 }
 
 /// Check if tracks contain auto-fit repeat

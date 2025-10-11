@@ -78,7 +78,50 @@ pub fn should_align_baseline(
     }
 }
 
-/// Extract baseline offset for a masonry item
+/// Extract baseline from layout output (NEW - Taffy's approach)
+/// This is called AFTER the item has been laid out
+pub fn extract_item_baseline_from_layout(
+    tree: &BaseDocument,
+    item_id: NodeId,
+    layout_output: &taffy::tree::LayoutOutput,
+    masonry_axis: AbstractAxis,
+    container_size: taffy::Size<Option<f32>>,
+) -> Option<f32> {
+    // Method 1: Extract from layout output (PRIMARY - from Taffy's grid)
+    // Pattern from: /tmp/taffy/src/compute/grid/track_sizing.rs:501-507
+    if let Some(baseline_y) = layout_output.first_baselines.y {
+        // Baseline includes top margin per CSS spec
+        let top_margin = extract_top_margin(tree, item_id, masonry_axis, container_size);
+        
+        #[cfg(feature = "tracing")]
+        tracing::debug!(
+            "Item {} baseline from layout: {} + margin: {} = {}",
+            usize::from(item_id),
+            baseline_y,
+            top_margin,
+            baseline_y + top_margin
+        );
+        
+        return Some(baseline_y + top_margin);
+    }
+
+    // Method 2: Fallback to font metrics for simple text
+    let node = tree.node_from_id(item_id.into());
+    if let Some(element) = node.data.downcast_element() {
+        if let Some(styles) = node.primary_styles() {
+            if let Some(baseline) = calculate_baseline_from_font_metrics(tree, element, &*styles) {
+                let top_margin = extract_top_margin(tree, item_id, masonry_axis, container_size);
+                return Some(baseline + top_margin);
+            }
+        }
+    }
+
+    // Method 3: No baseline - will use height as fallback
+    None
+}
+
+/// Extract baseline offset for a masonry item (DEPRECATED - use extract_item_baseline_from_layout)
+#[allow(dead_code)]
 pub fn extract_item_baseline(
     tree: &BaseDocument,
     item_id: NodeId,
@@ -86,8 +129,6 @@ pub fn extract_item_baseline(
     let node = tree.node_from_id(item_id.into());
 
     // Method 1: Calculate from font metrics for text content
-    // Note: Layout type doesn't have first_baselines field (that's only in LayoutOutput)
-    // Future: Could store baseline in custom cache if needed
     if let Some(element) = node.data.downcast_element() {
         if let Some(styles) = node.primary_styles() {
             return calculate_baseline_from_font_metrics(tree, element, &*styles);
@@ -95,7 +136,6 @@ pub fn extract_item_baseline(
     }
 
     // Method 2: For replaced elements, use margin box bottom
-    // (per CSS spec: replaced elements use their margin box)
     None // Item has no baseline, will use height as fallback
 }
 
@@ -178,6 +218,7 @@ fn extract_top_margin(
 pub fn calculate_baseline_adjustments(
     tree: &BaseDocument,
     placed_items: &[(NodeId, stylo_taffy::GridArea)],
+    layout_outputs: &[taffy::tree::LayoutOutput],  // ✅ NEW: Layout outputs for baseline extraction
     masonry_axis: AbstractAxis,
     container_size: taffy::Size<Option<f32>>,
 ) -> Result<Vec<BaselineAdjustment>, GridPreprocessingError> {
@@ -189,7 +230,16 @@ pub fn calculate_baseline_adjustments(
             continue; // Skip items not using baseline alignment
         }
 
-        let baseline_offset = extract_item_baseline(tree, *item_id);
+        // ✅ Extract baseline from layout output (Taffy's approach)
+        let layout_output = &layout_outputs[idx];
+        let baseline_offset = extract_item_baseline_from_layout(
+            tree, 
+            *item_id, 
+            layout_output,
+            masonry_axis,
+            container_size,
+        );
+        
         let top_margin = extract_top_margin(tree, *item_id, masonry_axis, container_size);
         let item_height = grid_area.masonry_axis_size;
         let grid_axis_track = grid_area.grid_axis_start;
@@ -227,8 +277,9 @@ pub fn calculate_baseline_adjustments(
                 baseline_items.iter()
                     .find(|(idx, _)| *idx == placed_idx)
                     .map(|(_, item)| {
-                        // Baseline includes top margin, same as Taffy pattern
-                        item.baseline_offset.unwrap_or(item.item_height) + item.top_margin
+                        // ✅ FIX: baseline_offset already includes top_margin from extract_item_baseline_from_layout()
+                        // Don't add it again! (Taffy pattern: margin added once when storing baseline)
+                        item.baseline_offset.unwrap_or(item.item_height + item.top_margin)
                     })
             })
             .fold(f32::NEG_INFINITY, f32::max);
@@ -250,7 +301,8 @@ pub fn calculate_baseline_adjustments(
         for &placed_idx in &group.items {
             // Find the baseline item for this placed index
             if let Some((_, item)) = baseline_items.iter().find(|(idx, _)| *idx == placed_idx) {
-                let item_baseline = item.baseline_offset.unwrap_or(item.item_height) + item.top_margin;
+                // ✅ FIX: baseline_offset already includes top_margin, don't add it twice!
+                let item_baseline = item.baseline_offset.unwrap_or(item.item_height + item.top_margin);
 
                 // Shim = max_baseline - item_baseline
                 // (Same formula as Taffy: track_sizing.rs:516)
