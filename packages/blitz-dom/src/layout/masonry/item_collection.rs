@@ -19,6 +19,8 @@ pub struct MasonryConfig {
     pub track_count: usize,
     pub item_tolerance: f32,
     pub dense_packing: bool,
+    /// Range of auto-fit tracks (start_index, end_index) if auto-fit is used
+    pub auto_fit_range: Option<(usize, usize)>,
 }
 
 /// Calculate track count and extract item-tolerance from computed styles
@@ -37,28 +39,99 @@ pub fn calculate_masonry_config(
         )
     })?;
 
-    let style_wrapper = stylo_taffy::TaffyStyloStyle::from(computed_styles);
+    let style_wrapper = stylo_taffy::TaffyStyloStyle::from(&*computed_styles);
 
-    // Determine masonry axis
-    let masonry_axis = if style_wrapper.has_masonry_rows() {
-        AbstractAxis::Block
+    // Determine masonry axis by checking RAW stylo values before conversion
+    let raw_rows = style_wrapper.raw_grid_template_rows();
+    let raw_cols = style_wrapper.raw_grid_template_columns();
+    
+    let mut has_masonry_rows = stylo_taffy::convert::is_masonry_axis(raw_rows);
+    let mut has_masonry_columns = stylo_taffy::convert::is_masonry_axis(raw_cols);
+    
+    // Check for display: masonry or display: inline-masonry
+    let display = computed_styles.clone_display();
+    let display_is_masonry = stylo_taffy::convert::is_display_masonry(display);
+    
+    // WORKAROUND: Infer masonry axis when not explicitly declared
+    // This applies to both display:masonry and display:grid with masonry features
+    // If one axis has explicit tracks and the other doesn't, the empty one is masonry
+    if !has_masonry_rows && !has_masonry_columns {
+        let cols_has_tracks = style_wrapper.grid_template_columns().is_some();
+        let rows_has_tracks = style_wrapper.grid_template_rows().is_some();
+        
+        if cols_has_tracks && !rows_has_tracks {
+            // Columns defined, rows empty → rows are masonry
+            has_masonry_rows = true;
+        } else if rows_has_tracks && !cols_has_tracks {
+            // Rows defined, columns empty → columns are masonry
+            has_masonry_columns = true;
+        } else if display_is_masonry {
+            // display: masonry with neither axis defined → default to rows as masonry
+            has_masonry_rows = true;
+        }
+    }
+    
+    // Determine masonry flow axis (direction items stack/cascade):
+    // - has_masonry_rows: items flow horizontally across row tracks → Inline axis
+    // - has_masonry_columns: items flow vertically down column tracks → Block axis
+    // Note: grid axis (where tracks are counted) is perpendicular to masonry axis
+    let masonry_axis = if has_masonry_rows {
+        AbstractAxis::Inline  // Row masonry: items flow horizontally
     } else {
-        AbstractAxis::Inline
+        AbstractAxis::Block   // Column masonry: items flow vertically
     };
 
     // Extract available size for grid axis
+    // Try known_dimensions first, then fall back to available_space for definite values
     let available_size = match masonry_axis {
-        AbstractAxis::Block => inputs.known_dimensions.width,   // Masonry rows → use column size
-        AbstractAxis::Inline => inputs.known_dimensions.height, // Masonry columns → use row size
+        AbstractAxis::Block => {
+            // Masonry rows → use column size (width)
+            inputs.known_dimensions.width
+                .or_else(|| inputs.available_space.width.into_option())
+        }
+        AbstractAxis::Inline => {
+            // Masonry columns → use row size (height)
+            inputs.known_dimensions.height
+                .or_else(|| inputs.available_space.height.into_option())
+        }
     };
 
-    // Calculate track count using new auto-repeat-aware function
-    let track_count = super::track_counting::get_definite_axis_track_count(
-        tree,
-        node_id,
-        masonry_axis,
-        available_size,
-    )?;
+    // Check if auto-repeat exists to get both count and auto-fit range
+    let tracks = match masonry_axis {
+        AbstractAxis::Block => style_wrapper.grid_template_columns(),
+        AbstractAxis::Inline => style_wrapper.grid_template_rows(),
+    };
+    
+    let (final_track_count, auto_fit_range) = if let Some(tracks) = tracks {
+        let has_auto = tracks.clone().any(|component| match component {
+            taffy::GenericGridTemplateComponent::Repeat(repeat) => {
+                matches!(repeat.count, taffy::RepetitionCount::AutoFill | taffy::RepetitionCount::AutoFit)
+            }
+            _ => false,
+        });
+        
+        if has_auto {
+            // Get full TrackCountResult with auto-fit range
+            let result = super::track_counting::calculate_auto_repeat_track_count(
+                tree,
+                node_id,
+                masonry_axis,
+                available_size,
+            )?;
+            (result.count, result.auto_fit_range)
+        } else {
+            // No auto-repeat, use simple count
+            let count = super::track_counting::get_definite_axis_track_count(
+                tree,
+                node_id,
+                masonry_axis,
+                available_size,
+            )?;
+            (count, None)
+        }
+    } else {
+        (1, None)
+    };
 
     // Extract item-tolerance from computed styles using CSS Grid Level 3 properties
     let item_tolerance = extract_masonry_item_tolerance_from_styles(tree, node_id)?;
@@ -67,9 +140,10 @@ pub fn calculate_masonry_config(
     let dense_packing = extract_dense_packing_from_styles(tree, node_id)?;
 
     Ok(MasonryConfig {
-        track_count: track_count.max(1), // Ensure at least 1 track
+        track_count: final_track_count.max(1), // Ensure at least 1 track
         item_tolerance,
         dense_packing,
+        auto_fit_range,
     })
 }
 

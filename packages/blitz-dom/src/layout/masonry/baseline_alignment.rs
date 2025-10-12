@@ -41,6 +41,8 @@ pub struct BaselineGroup {
     pub items: Vec<usize>, // Indices into baseline_items array
     /// Maximum baseline in this group
     pub max_baseline: f32,
+    /// Track actual masonry-axis position for this group
+    pub position: f32,
 }
 
 /// Result of baseline alignment calculation
@@ -264,7 +266,8 @@ pub fn calculate_baseline_adjustments(
         groups.entry(item.grid_axis_track)
             .or_insert_with(|| BaselineGroup {
                 items: Vec::new(),
-                max_baseline: 0.0
+                max_baseline: 0.0,
+                position: 0.0,
             })
             .items.push(*placed_idx);
     }

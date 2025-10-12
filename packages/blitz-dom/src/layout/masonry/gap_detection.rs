@@ -41,6 +41,10 @@ pub fn detect_compatible_gaps(
 ) -> Vec<GapOpportunity> {
     let mut gaps = Vec::new();
 
+    // Find normal placement position (where item would go without dense packing)
+    let normal_track = masonry_state.find_shortest_track_with_tolerance();
+    let normal_position = masonry_state.get_track_position(normal_track);
+
     // Find maximum track position (the "leading edge" of the layout)
     let max_position = masonry_state
         .track_positions
@@ -59,12 +63,18 @@ pub fn detect_compatible_gaps(
             .map(|i| masonry_state.get_track_position(i))
             .collect();
 
-        // Gap position is the maximum position among spanned tracks
+        // Gap position is the maximum position among spanned tracks (the "floor" of the gap)
         let gap_position = spanned_positions
             .iter()
             .copied()
             .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
             .unwrap_or(0.0);
+
+        // CRITICAL: Only consider gaps earlier than normal placement (dense packing rule)
+        // Dense packing should only backfill gaps, not place items forward
+        if gap_position >= normal_position {
+            continue;
+        }
 
         // Gap size is distance from gap_position to max_position
         let gap_size = max_position - gap_position;

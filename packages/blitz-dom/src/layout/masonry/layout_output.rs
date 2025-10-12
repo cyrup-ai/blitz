@@ -17,13 +17,14 @@ pub fn layout_masonry_items(
     inputs: taffy::tree::LayoutInput,
     masonry_axis: AbstractAxis,
     track_sizes: &[f32],
+    gap_size: f32,
 ) -> Result<Vec<taffy::tree::LayoutOutput>, GridPreprocessingError> {
     let mut layout_outputs = Vec::with_capacity(placed_items.len());
 
     // Layout each item and its children (following Taffy's grid pattern)
     // Pattern from: /tmp/taffy/src/compute/grid/alignment.rs:202-253
     for (item_id, grid_area) in placed_items {
-        let (_, size) = grid_area_to_layout(grid_area, masonry_axis, track_sizes);
+        let (_, size) = grid_area_to_layout(grid_area, masonry_axis, track_sizes, gap_size);
 
         // Layout the item (this recursively lays out all children)
         let layout_output = tree.compute_child_layout(
@@ -68,10 +69,11 @@ pub fn apply_masonry_positions(
     layout_outputs: &[taffy::tree::LayoutOutput],
     masonry_axis: AbstractAxis,
     track_sizes: &[f32],
+    gap_size: f32,
 ) {
     // Apply final positions to each item
     for (idx, (item_id, grid_area)) in placed_items.iter().enumerate() {
-        let (location, size) = grid_area_to_layout(grid_area, masonry_axis, track_sizes);
+        let (location, size) = grid_area_to_layout(grid_area, masonry_axis, track_sizes, gap_size);
         let layout_output = &layout_outputs[idx];
 
         let item_layout = Layout {
@@ -103,12 +105,14 @@ pub fn generate_container_output(
     masonry_axis: AbstractAxis,
     inputs: taffy::tree::LayoutInput,
     track_sizes: &[f32],
+    gap_size: f32,
 ) -> taffy::tree::LayoutOutput {
     let container_size = calculate_container_size_from_placements(
         placed_items,
         masonry_axis,
         inputs.available_space,
         track_sizes,
+        gap_size,
     );
 
     taffy::LayoutOutput {

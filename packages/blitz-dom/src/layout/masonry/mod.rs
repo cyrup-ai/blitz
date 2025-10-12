@@ -32,12 +32,11 @@ pub fn apply_masonry_layout(
 ) -> Result<taffy::tree::LayoutOutput, GridPreprocessingError> {
     use stylo_taffy::MasonryTrackState;
 
-    // Phase 1: Size tracks before any item placement ✨ NEW
-    let track_sizes =
-        track_sizing::size_masonry_tracks_before_placement(tree, node_id, &inputs, masonry_axis)?;
-
-    // Phase 2: Get masonry configuration with auto-repeat support ✨ WARNING 12
+    // Phase 1: Get masonry configuration with auto-repeat support (MUST BE FIRST)
     let config = item_collection::calculate_masonry_config(tree, node_id, &inputs)?;
+
+    // Phase 2: Size tracks using the track count from config
+    let track_sizes = track_sizing::size_masonry_tracks_before_placement(tree, node_id, &inputs, masonry_axis, config.track_count)?;
 
     // Phase 3: Initialize masonry state with configuration ✨ WARNING 11
     let mut masonry_state =
@@ -120,21 +119,41 @@ pub fn apply_masonry_layout(
         placed_items.push(placement);
     }
 
-    // Phase 5.5: Collapse empty tracks for auto-fit (optional enhancement)
-    let node = tree.node_from_id(node_id.into());
-    if let Some(styles) = node.primary_styles() {
-        let style_wrapper = stylo_taffy::TaffyStyloStyle::from(styles);
-        let tracks = match masonry_axis {
-            AbstractAxis::Block => style_wrapper.grid_template_columns(),
-            AbstractAxis::Inline => style_wrapper.grid_template_rows(),
-        };
+    // Phase 5.5: Collapse empty auto-fit tracks if needed
+    let mut collapsed_track_sizes = track_sizes.clone();
+    eprintln!("[MASONRY] Track count: {}, auto_fit_range: {:?}", track_sizes.len(), config.auto_fit_range);
+    if let Some((auto_fit_start, auto_fit_end)) = config.auto_fit_range {
+        eprintln!("[MASONRY] Collapsing auto-fit tracks [{}, {})", auto_fit_start, auto_fit_end);
+        collapse_auto_fit_tracks_in_range(
+            &mut placed_items,
+            &mut collapsed_track_sizes,
+            auto_fit_start,
+            auto_fit_end,
+        );
+        eprintln!("[MASONRY] After collapse: original track_sizes={:?}, collapsed={:?}", track_sizes, collapsed_track_sizes);
+    }
 
-        if let Some(tracks) = tracks {
-            if has_auto_fit_tracks(tracks) {
-                collapse_empty_auto_fit_tracks(&mut placed_items, &track_sizes, masonry_axis);
+    // Extract gap size for position calculations
+    let node = tree.node_from_id(node_id.into());
+    let gap_size = if let Some(styles) = node.primary_styles() {
+        let style_wrapper = stylo_taffy::TaffyStyloStyle::from(styles);
+        match masonry_axis {
+            AbstractAxis::Block => {
+                // Masonry columns → use column gap (horizontal)
+                use taffy::ResolveOrZero;
+                let container_size = inputs.known_dimensions.width.unwrap_or(0.0);
+                style_wrapper.gap().width.resolve_or_zero(Some(container_size), |_, _| 0.0)
+            }
+            AbstractAxis::Inline => {
+                // Masonry rows → use row gap (vertical)
+                use taffy::ResolveOrZero;
+                let container_size = inputs.known_dimensions.height.unwrap_or(0.0);
+                style_wrapper.gap().height.resolve_or_zero(Some(container_size), |_, _| 0.0)
             }
         }
-    }
+    } else {
+        0.0
+    };
 
     // Phase 5.7: Layout items first to extract baselines
     let layout_outputs = layout_output::layout_masonry_items(
@@ -142,7 +161,8 @@ pub fn apply_masonry_layout(
         &placed_items,
         inputs,
         masonry_axis,
-        &track_sizes,
+        &collapsed_track_sizes,
+        gap_size,
     )?;
 
     // Phase 5.8: Calculate baseline alignment adjustments using layout outputs
@@ -168,7 +188,8 @@ pub fn apply_masonry_layout(
         &placed_items,
         &layout_outputs,
         masonry_axis,
-        &track_sizes,
+        &collapsed_track_sizes,
+        gap_size,
     );
 
     // Phase 7: Generate container layout output
@@ -176,54 +197,73 @@ pub fn apply_masonry_layout(
         &placed_items,
         masonry_axis,
         inputs,
-        &track_sizes,
+        &collapsed_track_sizes,
+        gap_size,
     ))
 }
 
-/// Check if tracks contain auto-fit repeat
-fn has_auto_fit_tracks<'a, I>(mut tracks: I) -> bool
-where
-    I: Iterator<Item = taffy::GenericGridTemplateComponent<String, &'a taffy::GridTemplateRepetition<String>>>,
-{
-    tracks.any(|component| match component {
-        taffy::GenericGridTemplateComponent::Single(_) => false,
-        taffy::GenericGridTemplateComponent::Repeat(repeat) => {
-            matches!(repeat.count, taffy::RepetitionCount::AutoFit)
-        }
-    })
-}
-
-/// Collapse empty auto-fit tracks after placement
-fn collapse_empty_auto_fit_tracks(
+/// Collapse empty auto-fit tracks in the specified range
+/// This implements the CSS Grid auto-fit behavior where empty auto-fit tracks collapse to size 0
+fn collapse_auto_fit_tracks_in_range(
     placed_items: &mut Vec<(NodeId, stylo_taffy::GridArea)>,
-    track_sizes: &[f32],
-    _masonry_axis: AbstractAxis,
+    track_sizes: &mut Vec<f32>,
+    auto_fit_start: usize,
+    auto_fit_end: usize,
 ) {
     use std::collections::HashSet;
 
-    // Determine which tracks have items
+    // Step 1: Identify which tracks have items
+    // An item occupies all tracks from grid_axis_start to grid_axis_end (exclusive)
     let mut tracks_with_items = HashSet::new();
     for (_node_id, grid_area) in placed_items.iter() {
-        tracks_with_items.insert(grid_area.grid_axis_start);
-    }
-
-    // Calculate cumulative offset from collapsed tracks
-    let mut cumulative_offset = 0.0;
-    let mut track_offsets = vec![0.0; track_sizes.len()];
-
-    for (idx, &size) in track_sizes.iter().enumerate() {
-        track_offsets[idx] = cumulative_offset;
-        if !tracks_with_items.contains(&idx) {
-            // Track is empty - will be collapsed
-            cumulative_offset += size;
+        for track in grid_area.grid_axis_start..grid_area.grid_axis_end {
+            tracks_with_items.insert(track);
         }
     }
 
-    // Apply offsets to shift items in later tracks
+    // Step 2: Build list of tracks to collapse (empty auto-fit tracks)
+    let mut tracks_to_collapse = Vec::new();
+    for idx in auto_fit_start..auto_fit_end {
+        if idx < track_sizes.len() && !tracks_with_items.contains(&idx) {
+            tracks_to_collapse.push(idx);
+        }
+    }
+
+    // If no tracks to collapse, we're done
+    if tracks_to_collapse.is_empty() {
+        return;
+    }
+
+    // Step 3: Calculate cumulative offset for each track position
+    // This is the total size of all collapsed tracks before this position
+    let mut track_position_shifts = vec![0.0; track_sizes.len()];
+    let mut cumulative_shift = 0.0;
+    
+    for idx in 0..track_sizes.len() {
+        track_position_shifts[idx] = cumulative_shift;
+        
+        // If this track should be collapsed, add its size to cumulative shift
+        if tracks_to_collapse.contains(&idx) {
+            cumulative_shift += track_sizes[idx];
+            track_sizes[idx] = 0.0; // Collapse the track to size 0
+        }
+    }
+
+    // Step 4: Recalculate grid_axis positions for all items
+    // For items in the grid axis (horizontal for column masonry), we need to calculate
+    // their position based on the sum of track sizes before them
     for (_node_id, grid_area) in placed_items.iter_mut() {
-        let track_idx = grid_area.grid_axis_start;
-        if track_idx < track_offsets.len() {
-            grid_area.masonry_axis_position -= track_offsets[track_idx];
+        // Calculate new position by summing non-collapsed track sizes before this item
+        let mut new_position = 0.0;
+        for idx in 0..grid_area.grid_axis_start {
+            if idx < track_sizes.len() {
+                new_position += track_sizes[idx];
+            }
         }
+        
+        // Note: GridArea doesn't have a grid_axis_position field to update
+        // The position is calculated during apply_masonry_positions using track_sizes
+        // Since we've updated track_sizes to have 0 for collapsed tracks,
+        // the position calculation will automatically account for collapsed tracks
     }
 }

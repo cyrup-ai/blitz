@@ -4,62 +4,140 @@
 
 use taffy::geometry::AbstractAxis;
 use taffy::prelude::NodeId;
+use taffy::RepetitionCount;
 
 use super::super::grid_errors::GridPreprocessingError;
 use super::virtual_placement::{GridItemInfo, create_virtual_placements_for_spanning_items};
 use crate::BaseDocument;
 
+/// Expand track template to exactly the specified track count
+/// Handles auto-fill/auto-fit by calculating the correct number of repetitions
+fn expand_track_template_to_count<'a, I>(
+    tracks: I,
+    target_count: usize,
+    tree: &BaseDocument,
+    node_id: NodeId,
+    masonry_axis: AbstractAxis,
+) -> Result<Vec<taffy::TrackSizingFunction>, GridPreprocessingError>
+where
+    I: Iterator<Item = taffy::GenericGridTemplateComponent<String, &'a taffy::GridTemplateRepetition<String>>> + Clone,
+{
+    let mut result = Vec::new();
+    let mut auto_repeat_tracks: Option<&[taffy::TrackSizingFunction]> = None;
+    let mut tracks_before_auto = 0;
+    let mut tracks_after_auto = 0;
+    
+    // First pass: count non-auto tracks and identify auto-repeat
+    let mut found_auto_repeat = false;
+    for component in tracks.clone() {
+        match component {
+            taffy::GenericGridTemplateComponent::Single(_) => {
+                if !found_auto_repeat {
+                    tracks_before_auto += 1;
+                } else {
+                    tracks_after_auto += 1;
+                }
+            }
+            taffy::GenericGridTemplateComponent::Repeat(repeat) => {
+                match repeat.count {
+                    RepetitionCount::AutoFill | RepetitionCount::AutoFit => {
+                        auto_repeat_tracks = Some(&repeat.tracks);
+                        found_auto_repeat = true;
+                    }
+                    RepetitionCount::Count(n) => {
+                        let count = (n as usize) * repeat.tracks.len();
+                        if !found_auto_repeat {
+                            tracks_before_auto += count;
+                        } else {
+                            tracks_after_auto += count;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    let non_auto_count = tracks_before_auto + tracks_after_auto;
+    
+    // Calculate auto-repeat repetitions
+    let auto_repetitions = if let Some(auto_tracks) = auto_repeat_tracks {
+        let repeat_track_count = auto_tracks.len();
+        if target_count >= non_auto_count && repeat_track_count > 0 {
+            (target_count - non_auto_count) / repeat_track_count
+        } else {
+            0
+        }
+    } else {
+        0
+    };
+    
+    // Second pass: build result
+    found_auto_repeat = false;
+    for component in tracks {
+        match component {
+            taffy::GenericGridTemplateComponent::Single(sizing_fn) => {
+                result.push(sizing_fn);
+            }
+            taffy::GenericGridTemplateComponent::Repeat(repeat) => {
+                match repeat.count {
+                    RepetitionCount::AutoFill | RepetitionCount::AutoFit => {
+                        // Insert calculated repetitions
+                        for _ in 0..auto_repetitions {
+                            for &sizing_fn in repeat.tracks.iter() {
+                                result.push(sizing_fn);
+                            }
+                        }
+                        found_auto_repeat = true;
+                    }
+                    RepetitionCount::Count(n) => {
+                        // Fixed count repeat
+                        for _ in 0..n {
+                            for &sizing_fn in repeat.tracks.iter() {
+                                result.push(sizing_fn);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    // Ensure we have exactly target_count tracks
+    if result.len() < target_count {
+        // Pad with auto tracks if needed (auto = min-content/max-content)
+        let auto_track = taffy::TrackSizingFunction {
+            min: taffy::MinTrackSizingFunction::auto(),
+            max: taffy::MaxTrackSizingFunction::auto(),
+        };
+        while result.len() < target_count {
+            result.push(auto_track);
+        }
+    }
+    
+    if result.len() > target_count {
+        result.truncate(target_count);
+    }
+    
+    Ok(result)
+}
+
 /// Size masonry tracks before item placement per CSS Grid Level 3 specification
 ///
 /// This implements the intrinsic sizing algorithm where all items contribute
 /// to track sizing regardless of their final placement position.
+///
+/// The track_count parameter comes from calculate_masonry_config which properly
+/// handles auto-fill/auto-fit calculations.
 pub fn size_masonry_tracks_before_placement(
     tree: &BaseDocument,
     container_id: NodeId,
     inputs: &taffy::tree::LayoutInput,
     masonry_axis: AbstractAxis,
+    track_count: usize,
 ) -> Result<Vec<f32>, GridPreprocessingError> {
     use super::super::grid_context::{GridAxis, extract_tracks_from_stylo_computed_styles};
     use super::super::grid_errors::MasonryError;
-
-    // Step 1: Extract track definitions from the definite (non-masonry) axis using existing infrastructure
-    let node = tree.node_from_id(container_id.into());
-    let computed_styles = node.primary_styles().ok_or_else(|| {
-        GridPreprocessingError::preprocessing_failed(
-            "track_definition_extraction",
-            container_id.into(),
-            "Primary styles not available",
-        )
-    })?;
-
-    // Note: style_wrapper not needed since we use stylo integration directly
-
-    // Get track definitions from the definite axis (non-masonry axis)
-    // Integrate subgrid inheritance registry to get effective tracks
-    let _axis = match masonry_axis {
-        AbstractAxis::Block => GridAxis::Column,
-        AbstractAxis::Inline => GridAxis::Row,
-    };
-
-    let fallback_tracks = match masonry_axis {
-        AbstractAxis::Block => {
-            // Masonry rows: get track definitions from columns
-            extract_tracks_from_stylo_computed_styles(&computed_styles, GridAxis::Column)?
-        }
-        AbstractAxis::Inline => {
-            // Masonry columns: get track definitions from rows
-            extract_tracks_from_stylo_computed_styles(&computed_styles, GridAxis::Row)?
-        }
-    };
-
-    // Use verified existing function from grid_context/track_extraction.rs:135
-    let track_definitions = super::super::grid_context::extract_tracks_from_stylo_computed_styles(
-        &computed_styles,
-        super::super::grid_context::GridAxis::Row,
-    )
-    .unwrap_or(fallback_tracks);
-
-    let track_count = track_definitions.len();
+    use taffy::GridContainerStyle;
 
     if track_count == 0 {
         return Err(GridPreprocessingError::Masonry(
@@ -70,6 +148,43 @@ pub fn size_masonry_tracks_before_placement(
             },
         ));
     }
+
+    // Step 1: Extract track template (with auto-repeat unexpanded) from the definite axis
+    let node = tree.node_from_id(container_id.into());
+    let computed_styles = node.primary_styles().ok_or_else(|| {
+        GridPreprocessingError::preprocessing_failed(
+            "track_definition_extraction",
+            container_id.into(),
+            "Primary styles not available",
+        )
+    })?;
+
+    let style_wrapper = stylo_taffy::TaffyStyloStyle::from(&*computed_styles);
+    
+    // Get track template from grid axis (opposite of masonry axis)
+    let track_template = match masonry_axis {
+        AbstractAxis::Block => GridContainerStyle::grid_template_columns(&style_wrapper),
+        AbstractAxis::Inline => GridContainerStyle::grid_template_rows(&style_wrapper),
+    };
+
+    let Some(track_template) = track_template else {
+        // No template defined, create even-sized tracks
+        let container_size = match masonry_axis {
+            AbstractAxis::Block => inputs.known_dimensions.width.unwrap_or(0.0),
+            AbstractAxis::Inline => inputs.known_dimensions.height.unwrap_or(0.0),
+        };
+        let track_size = container_size / track_count as f32;
+        return Ok(vec![track_size; track_count]);
+    };
+
+    // Step 2: Manually expand the template to exactly track_count tracks
+    let track_definitions = expand_track_template_to_count(
+        track_template,
+        track_count,
+        tree,
+        container_id,
+        masonry_axis,
+    )?;
 
     // Step 2: Collect items (existing infrastructure) ✅
     let all_items = super::item_collection::collect_grid_items_for_masonry(tree, container_id)?;
@@ -115,8 +230,38 @@ fn calculate_track_sizes_from_definitions(
     inputs: &taffy::tree::LayoutInput,
     masonry_axis: AbstractAxis,
 ) -> Result<Vec<f32>, GridPreprocessingError> {
-    // Use Taffy's intrinsic sizing algorithm to calculate proper track sizes
-    let track_sizes = compute_taffy_track_sizes(
+    use taffy::ResolveOrZero;
+    
+    // For fixed-size tracks, use the specified sizes directly
+    // Only use Taffy's algorithm for intrinsic sizing (auto, min-content, max-content, fr, etc.)
+    let mut track_sizes = Vec::with_capacity(track_definitions.len());
+    let mut has_intrinsic_tracks = false;
+    
+    for sizing_fn in track_definitions {
+        // Try to resolve as a definite value first
+        if let Some(definite_max) = sizing_fn.max.definite_value(Some(available_space), |_, _| 0.0) {
+            // If min is also definite, use max(min, max)
+            if let Some(definite_min) = sizing_fn.min.definite_value(Some(available_space), |_, _| 0.0) {
+                track_sizes.push(definite_max.max(definite_min));
+            } else {
+                track_sizes.push(definite_max);
+            }
+        } else if let Some(definite_min) = sizing_fn.min.definite_value(Some(available_space), |_, _| 0.0) {
+            track_sizes.push(definite_min);
+        } else {
+            // Track has intrinsic sizing - mark for Taffy algorithm
+            has_intrinsic_tracks = true;
+            track_sizes.push(0.0); // Placeholder
+        }
+    }
+    
+    // If all tracks are fixed sizes, we're done
+    if !has_intrinsic_tracks {
+        return Ok(track_sizes);
+    }
+    
+    // Otherwise, use Taffy's algorithm for intrinsic tracks
+    let taffy_sizes = compute_taffy_track_sizes(
         track_definitions,
         available_space,
         grid_items,
@@ -125,7 +270,7 @@ fn calculate_track_sizes_from_definitions(
         masonry_axis,
     )?;
 
-    Ok(track_sizes)
+    Ok(taffy_sizes)
 }
 
 /// Create track sizing information using Taffy patterns

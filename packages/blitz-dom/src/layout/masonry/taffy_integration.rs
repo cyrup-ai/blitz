@@ -133,33 +133,72 @@ pub fn grid_area_to_layout(
     grid_area: &stylo_taffy::GridArea,
     masonry_axis: AbstractAxis,
     track_sizes: &[f32],
+    gap_size: f32,
 ) -> (taffy::Point<f32>, Size<f32>) {
     match masonry_axis {
         AbstractAxis::Block => {
             // Masonry flows vertically
+            // Calculate x position by summing all track sizes AND gaps before this item's start track
+            let mut x_position: f32 = 0.0;
+            for i in 0..grid_area.grid_axis_start.min(track_sizes.len()) {
+                x_position += track_sizes[i];
+            }
+            // Add gaps between all tracks before this one (N tracks means N gaps before track N)
+            if grid_area.grid_axis_start > 0 {
+                x_position += gap_size * grid_area.grid_axis_start as f32;
+            }
+            
+            // Calculate width by summing track sizes in the span plus internal gaps
+            let mut width: f32 = 0.0;
+            for i in grid_area.grid_axis_start..grid_area.grid_axis_end.min(track_sizes.len()) {
+                width += track_sizes[i];
+            }
+            // Add gaps between spanned tracks (span-1 gaps for span tracks)
+            let span_count = grid_area.grid_axis_end - grid_area.grid_axis_start;
+            if span_count > 1 {
+                width += gap_size * (span_count - 1) as f32;
+            }
+            
             let location = taffy::Point {
-                x: (grid_area.grid_axis_start as f32)
-                    * get_track_width_from_sizes(grid_area.grid_axis_start, track_sizes),
+                x: x_position,
                 y: grid_area.masonry_axis_position,
             };
             let size = Size {
-                width: ((grid_area.grid_axis_end - grid_area.grid_axis_start) as f32)
-                    * get_track_width_from_sizes(grid_area.grid_axis_start, track_sizes),
+                width,
                 height: grid_area.masonry_axis_size,
             };
             (location, size)
         }
         AbstractAxis::Inline => {
             // Masonry flows horizontally
+            // Calculate y position by summing all track sizes AND gaps before this item's start track
+            let mut y_position: f32 = 0.0;
+            for i in 0..grid_area.grid_axis_start.min(track_sizes.len()) {
+                y_position += track_sizes[i];
+            }
+            // Add gaps for all tracks before this one
+            if grid_area.grid_axis_start > 0 {
+                y_position += gap_size * grid_area.grid_axis_start as f32;
+            }
+            
+            // Calculate height by summing track sizes in the span plus internal gaps
+            let mut height: f32 = 0.0;
+            for i in grid_area.grid_axis_start..grid_area.grid_axis_end.min(track_sizes.len()) {
+                height += track_sizes[i];
+            }
+            // Add gaps between spanned tracks (span-1 gaps for span tracks)
+            let span_count = grid_area.grid_axis_end - grid_area.grid_axis_start;
+            if span_count > 1 {
+                height += gap_size * (span_count - 1) as f32;
+            }
+            
             let location = taffy::Point {
                 x: grid_area.masonry_axis_position,
-                y: (grid_area.grid_axis_start as f32)
-                    * get_track_height_from_sizes(grid_area.grid_axis_start, track_sizes),
+                y: y_position,
             };
             let size = Size {
                 width: grid_area.masonry_axis_size,
-                height: ((grid_area.grid_axis_end - grid_area.grid_axis_start) as f32)
-                    * get_track_height_from_sizes(grid_area.grid_axis_start, track_sizes),
+                height,
             };
             (location, size)
         }
@@ -172,26 +211,26 @@ pub fn calculate_container_size_from_placements(
     masonry_axis: AbstractAxis,
     available_space: Size<AvailableSpace>,
     track_sizes: &[f32],
+    gap_size: f32,
 ) -> Size<f32> {
     let mut max_width: f32 = 0.0;
     let mut max_height: f32 = 0.0;
 
     for (_item_id, grid_area) in placed_items {
+        let (location, size) = grid_area_to_layout(grid_area, masonry_axis, track_sizes, gap_size);
+        
         match masonry_axis {
             AbstractAxis::Block => {
                 // Masonry flows vertically (row masonry)
-                // Use actual track positions, not hardcoded values
-                let item_right = (grid_area.grid_axis_end as f32)
-                    * get_track_width_from_sizes(grid_area.grid_axis_start, track_sizes);
-                let item_bottom = grid_area.masonry_axis_position + grid_area.masonry_axis_size;
+                let item_right = location.x + size.width;
+                let item_bottom = location.y + size.height;
                 max_width = max_width.max(item_right);
                 max_height = max_height.max(item_bottom);
             }
             AbstractAxis::Inline => {
                 // Masonry flows horizontally (column masonry)
-                let item_right = grid_area.masonry_axis_position + grid_area.masonry_axis_size;
-                let item_bottom = (grid_area.grid_axis_end as f32)
-                    * get_track_height_from_sizes(grid_area.grid_axis_start, track_sizes);
+                let item_right = location.x + size.width;
+                let item_bottom = location.y + size.height;
                 max_width = max_width.max(item_right);
                 max_height = max_height.max(item_bottom);
             }

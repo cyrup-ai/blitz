@@ -504,6 +504,11 @@ pub fn is_table(input: stylo::Display) -> bool {
 }
 
 #[inline]
+pub fn is_display_masonry(input: stylo::Display) -> bool {
+    matches!(input.inside(), stylo::DisplayInside::Masonry)
+}
+
+#[inline]
 pub fn display(input: stylo::Display) -> taffy::Display {
     let mut display = match input.inside() {
         stylo::DisplayInside::None => taffy::Display::None,
@@ -511,6 +516,8 @@ pub fn display(input: stylo::Display) -> taffy::Display {
         stylo::DisplayInside::Flex => taffy::Display::Flex,
         #[cfg(feature = "grid")]
         stylo::DisplayInside::Grid => taffy::Display::Grid,
+        #[cfg(feature = "grid")]
+        stylo::DisplayInside::Masonry => taffy::Display::Grid,
         #[cfg(feature = "block")]
         stylo::DisplayInside::Flow => taffy::Display::Block,
         #[cfg(feature = "block")]

@@ -4,6 +4,7 @@
 //! preprocessing before calling the standard taffy grid layout algorithm.
 
 use taffy::prelude::*;
+use taffy::GridContainerStyle;
 
 use super::grid_context::{
     GridAxis, ParentGridContext, detect_subgrid_from_stylo,
@@ -118,10 +119,31 @@ pub fn apply_basedocument_grid_preprocessing(
         let has_subgrid_rows = detect_subgrid_from_stylo(&computed_styles, GridAxis::Row);
         let has_subgrid_columns = detect_subgrid_from_stylo(&computed_styles, GridAxis::Column);
 
-        // Check for masonry layout
+        // Check for masonry layout using RAW stylo values before conversion
         let style_wrapper = stylo_taffy::TaffyStyloStyle::from(&*computed_styles);
-        let has_masonry_rows = style_wrapper.has_masonry_rows();
-        let has_masonry_columns = style_wrapper.has_masonry_columns();
+        let mut has_masonry_rows = stylo_taffy::convert::is_masonry_axis(style_wrapper.raw_grid_template_rows());
+        let mut has_masonry_columns = stylo_taffy::convert::is_masonry_axis(style_wrapper.raw_grid_template_columns());
+        
+        // Check for display: masonry or display: inline-masonry
+        let display = computed_styles.clone_display();
+        let display_is_masonry = stylo_taffy::convert::is_display_masonry(display);
+        
+        if display_is_masonry && !has_masonry_rows && !has_masonry_columns {
+            // display: masonry with columns defined → rows are masonry
+            // display: masonry with rows defined → columns are masonry
+            // display: masonry with neither → rows are masonry (default)
+            let cols_had_tracklist = style_wrapper.grid_template_columns().is_some();
+            let rows_had_tracklist = style_wrapper.grid_template_rows().is_some();
+            
+            if cols_had_tracklist && !rows_had_tracklist {
+                has_masonry_rows = true;
+            } else if rows_had_tracklist && !cols_had_tracklist {
+                has_masonry_columns = true;
+            } else {
+                // Default: masonry on rows
+                has_masonry_rows = true;
+            }
+        }
 
         (
             row_tracks,
@@ -201,11 +223,15 @@ where
             let has_subgrid = detect_subgrid_from_stylo(&styles, GridAxis::Row) 
                 || detect_subgrid_from_stylo(&styles, GridAxis::Column);
             
-            // Check for masonry layout
-            let has_masonry = style_wrapper.has_masonry_rows() 
-                || style_wrapper.has_masonry_columns();
+            // Check for masonry layout using RAW values before conversion
+            let has_masonry = stylo_taffy::convert::is_masonry_axis(style_wrapper.raw_grid_template_rows())
+                || stylo_taffy::convert::is_masonry_axis(style_wrapper.raw_grid_template_columns());
             
-            return has_subgrid || has_masonry;
+            // Check for display: masonry
+            let display = styles.clone_display();
+            let display_is_masonry = stylo_taffy::convert::is_display_masonry(display);
+            
+            return has_subgrid || has_masonry || display_is_masonry;
         }
     }
     

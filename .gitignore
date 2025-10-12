@@ -19,6 +19,7 @@
 **/CLAUDE.md
 ./CLAUDE.md
 task/*
+blitz.code-workspace
 
 # ==============================
 # Rust Specific

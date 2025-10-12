@@ -790,7 +790,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "117725a109d387c937a1533ce01b450cbde6b88abceea8473c4d7a85853cda3c"
 dependencies = [
  "lazy_static",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -1348,7 +1348,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc 0.2.176",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -2426,7 +2426,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4b0f83760fb341a774ed326568e19f5a863af4a952def8c39f9ab92fd95b88e5"
 dependencies = [
  "equivalent",
- "hashbrown 0.16.0",
+ "hashbrown 0.15.5",
  "serde",
  "serde_core",
 ]
@@ -3911,7 +3911,7 @@ dependencies = [
  "errno",
  "libc 0.2.176",
  "linux-raw-sys 0.4.15",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -3924,7 +3924,7 @@ dependencies = [
  "errno",
  "libc 0.2.176",
  "linux-raw-sys 0.11.0",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -4046,7 +4046,7 @@ dependencies = [
 [[package]]
 name = "selectors"
 version = "0.30.0"
-source = "git+https://github.com/cyrup-ai/stylo?branch=main#ed91fe56309b8e35bd8a0356ef5b87648f07b25b"
+source = "git+https://github.com/cyrup-ai/stylo?branch=main#7da18cb33bc020bb766368f1cd85634c0d6b1413"
 dependencies = [
  "bitflags",
  "cssparser",
@@ -4145,7 +4145,7 @@ dependencies = [
 [[package]]
 name = "servo_arc"
 version = "0.4.1"
-source = "git+https://github.com/cyrup-ai/stylo?branch=main#ed91fe56309b8e35bd8a0356ef5b87648f07b25b"
+source = "git+https://github.com/cyrup-ai/stylo?branch=main#7da18cb33bc020bb766368f1cd85634c0d6b1413"
 dependencies = [
  "serde",
  "stable_deref_trait",
@@ -4386,7 +4386,7 @@ dependencies = [
 [[package]]
 name = "stylo"
 version = "0.5.0"
-source = "git+https://github.com/cyrup-ai/stylo?branch=main#ed91fe56309b8e35bd8a0356ef5b87648f07b25b"
+source = "git+https://github.com/cyrup-ai/stylo?branch=main#7da18cb33bc020bb766368f1cd85634c0d6b1413"
 dependencies = [
  "app_units",
  "arrayvec",
@@ -4443,7 +4443,7 @@ dependencies = [
 [[package]]
 name = "stylo_atoms"
 version = "0.5.0"
-source = "git+https://github.com/cyrup-ai/stylo?branch=main#ed91fe56309b8e35bd8a0356ef5b87648f07b25b"
+source = "git+https://github.com/cyrup-ai/stylo?branch=main#7da18cb33bc020bb766368f1cd85634c0d6b1413"
 dependencies = [
  "string_cache",
  "string_cache_codegen",
@@ -4452,12 +4452,12 @@ dependencies = [
 [[package]]
 name = "stylo_config"
 version = "0.5.0"
-source = "git+https://github.com/cyrup-ai/stylo?branch=main#ed91fe56309b8e35bd8a0356ef5b87648f07b25b"
+source = "git+https://github.com/cyrup-ai/stylo?branch=main#7da18cb33bc020bb766368f1cd85634c0d6b1413"
 
 [[package]]
 name = "stylo_derive"
 version = "0.5.0"
-source = "git+https://github.com/cyrup-ai/stylo?branch=main#ed91fe56309b8e35bd8a0356ef5b87648f07b25b"
+source = "git+https://github.com/cyrup-ai/stylo?branch=main#7da18cb33bc020bb766368f1cd85634c0d6b1413"
 dependencies = [
  "darling",
  "proc-macro2",
@@ -4469,7 +4469,7 @@ dependencies = [
 [[package]]
 name = "stylo_dom"
 version = "0.5.0"
-source = "git+https://github.com/cyrup-ai/stylo?branch=main#ed91fe56309b8e35bd8a0356ef5b87648f07b25b"
+source = "git+https://github.com/cyrup-ai/stylo?branch=main#7da18cb33bc020bb766368f1cd85634c0d6b1413"
 dependencies = [
  "bitflags",
  "stylo_malloc_size_of",
@@ -4478,7 +4478,7 @@ dependencies = [
 [[package]]
 name = "stylo_malloc_size_of"
 version = "0.5.0"
-source = "git+https://github.com/cyrup-ai/stylo?branch=main#ed91fe56309b8e35bd8a0356ef5b87648f07b25b"
+source = "git+https://github.com/cyrup-ai/stylo?branch=main#7da18cb33bc020bb766368f1cd85634c0d6b1413"
 dependencies = [
  "app_units",
  "cssparser",
@@ -4495,7 +4495,7 @@ dependencies = [
 [[package]]
 name = "stylo_static_prefs"
 version = "0.5.0"
-source = "git+https://github.com/cyrup-ai/stylo?branch=main#ed91fe56309b8e35bd8a0356ef5b87648f07b25b"
+source = "git+https://github.com/cyrup-ai/stylo?branch=main#7da18cb33bc020bb766368f1cd85634c0d6b1413"
 
 [[package]]
 name = "stylo_taffy"
@@ -4510,7 +4510,7 @@ dependencies = [
 [[package]]
 name = "stylo_traits"
 version = "0.5.0"
-source = "git+https://github.com/cyrup-ai/stylo?branch=main#ed91fe56309b8e35bd8a0356ef5b87648f07b25b"
+source = "git+https://github.com/cyrup-ai/stylo?branch=main#7da18cb33bc020bb766368f1cd85634c0d6b1413"
 dependencies = [
  "app_units",
  "bitflags",
@@ -4669,7 +4669,7 @@ dependencies = [
  "getrandom 0.3.3",
  "once_cell",
  "rustix 1.1.2",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -4858,7 +4858,7 @@ checksum = "1f3ccbac311fea05f86f61904b462b55fb3df8837a366dfc601a0161d0532f20"
 [[package]]
 name = "to_shmem"
 version = "0.2.0"
-source = "git+https://github.com/cyrup-ai/stylo?branch=main#ed91fe56309b8e35bd8a0356ef5b87648f07b25b"
+source = "git+https://github.com/cyrup-ai/stylo?branch=main#7da18cb33bc020bb766368f1cd85634c0d6b1413"
 dependencies = [
  "cssparser",
  "servo_arc",
@@ -4871,7 +4871,7 @@ dependencies = [
 [[package]]
 name = "to_shmem_derive"
 version = "0.1.0"
-source = "git+https://github.com/cyrup-ai/stylo?branch=main#ed91fe56309b8e35bd8a0356ef5b87648f07b25b"
+source = "git+https://github.com/cyrup-ai/stylo?branch=main#7da18cb33bc020bb766368f1cd85634c0d6b1413"
 dependencies = [
  "darling",
  "proc-macro2",
@@ -5779,7 +5779,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]

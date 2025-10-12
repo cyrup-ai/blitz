@@ -1,0 +1,587 @@
+//! Core coordination methods for CSS Grid Multi-Pass Layout System
+
+use taffy::{NodeId, geometry::AbstractAxis, TraversePartialTree, GridContainerStyle};
+
+use crate::BaseDocument;
+use super::super::grid_context::ParentGridContext;
+use super::super::grid_errors::GridPreprocessingError;
+use super::super::intrinsic_sizing::calculate_item_intrinsic_size_for_masonry;
+use super::super::subgrid::layout_states::IntrinsicSizingState;
+use super::placement_types::*;
+use super::types::*;
+
+impl GridLayoutCoordinator {
+    /// Setup track inheritance for subgrid (Pass 1)
+    pub fn setup_track_inheritance<Tree>(
+        &mut self,
+        subgrid_id: NodeId,
+        parent_context: &ParentGridContext,
+        tree: &Tree,
+    ) -> Result<(), GridPreprocessingError>
+    where
+        Tree: taffy::LayoutGridContainer,
+    {
+        // 1. Determine subgrid span in parent
+        let subgrid_span = self.determine_subgrid_span(subgrid_id, parent_context, tree)?;
+
+        // 2. Extract corresponding parent tracks (ACTUAL TRACK DEFINITIONS)
+        let inherited_tracks = self.extract_parent_tracks(&subgrid_span, parent_context)?;
+
+        // 3. Replace subgrid's grid-template-* properties
+        self.replace_grid_template_properties(subgrid_id, &inherited_tracks)?;
+
+        // 4. Setup line name mapping (parent + local names)
+        let line_name_mapping = self.setup_line_name_mapping(subgrid_id, parent_context, tree)?;
+
+        // Create subgrid layout state
+        let subgrid_state = SubgridLayoutState {
+            inherited_tracks,
+            line_name_mapping,
+            size_contributions: Vec::new(),
+            layout_pass_state: LayoutPassState::default(),
+            subgrid_placement: subgrid_span,  // Store the GridArea for coordinate transformation
+        };
+
+        self.subgrid_states.insert(subgrid_id, subgrid_state);
+
+        Ok(())
+    }
+
+    /// Collect intrinsic size contributions (Pass 2)
+    pub fn collect_intrinsic_size_contributions(
+        &mut self,
+        tree: &BaseDocument,
+        subgrid_id: NodeId,
+        inputs: &taffy::tree::LayoutInput,
+    ) -> Result<Vec<TrackSizeContribution>, GridPreprocessingError> {
+        // 1. Measure content intrinsic sizes for all subgrid items
+        let content_sizes = self.measure_content_intrinsic_sizes(tree, subgrid_id, inputs)?;
+
+        // 2. Map to parent grid coordinates
+        let mapped_contributions = self.map_to_parent_coordinates(subgrid_id, content_sizes)?;
+
+        // 3. Create size contributions for parent tracks
+        let track_contributions =
+            self.create_track_contributions(subgrid_id, mapped_contributions)?;
+
+        // Update state
+        if let Some(state) = self.subgrid_states.get_mut(&subgrid_id) {
+            state.size_contributions = track_contributions.clone();
+        }
+
+        Ok(track_contributions)
+    }
+
+    /// Coordinate auto-placement (Pass 3)
+    pub fn coordinate_auto_placement<Tree>(
+        &mut self,
+        subgrid_id: NodeId,
+        tree: &Tree,
+    ) -> Result<Vec<ItemPlacement>, GridPreprocessingError>
+    where
+        Tree: taffy::LayoutGridContainer + taffy::TraversePartialTree + std::any::Any,
+    {
+        // 1. Initialize placement state with proper grid size, flow direction, and dense packing
+        
+        // FIX 1: Get grid size from inherited tracks or use reasonable default
+        let grid_size = if let Some(subgrid_state) = self.subgrid_states.get(&subgrid_id) {
+            GridPosition {
+                row: subgrid_state.inherited_tracks.row_tracks.len() as i32,
+                column: subgrid_state.inherited_tracks.column_tracks.len() as i32,
+            }
+        } else {
+            // Fallback: use reasonable default that can grow if needed
+            GridPosition { row: 12, column: 12 }
+        };
+
+        // FIX 2: Read grid-auto-flow from CSS to determine flow direction
+        let grid_style = tree.get_grid_container_style(subgrid_id);
+        let auto_flow = grid_style.grid_auto_flow();
+        
+        let flow_direction = match auto_flow {
+            taffy::GridAutoFlow::Row | taffy::GridAutoFlow::RowDense => FlowDirection::Row,
+            taffy::GridAutoFlow::Column | taffy::GridAutoFlow::ColumnDense => FlowDirection::Column,
+        };
+
+        // FIX 3: Initialize dense packing state if auto-flow contains "dense"
+        let dense_enabled = matches!(
+            auto_flow,
+            taffy::GridAutoFlow::RowDense | taffy::GridAutoFlow::ColumnDense
+        );
+
+        let dense_packing_state = if dense_enabled {
+            Some(DensePackingState {
+                unfilled_positions: Vec::new(),
+                pending_items: Vec::new(),
+                enabled: true,
+            })
+        } else {
+            None
+        };
+
+        let mut placement_state = AutoPlacementState {
+            cursor_position: GridPosition::default(),
+            ordered_items: Vec::new(),
+            explicit_placements: std::collections::HashMap::new(),
+            dense_packing_state,
+            track_occupancy: TrackOccupancyMap {
+                occupied_cells: std::collections::HashMap::new(),
+                grid_size,
+            },
+            flow_direction,
+        };
+
+        // 2. Process items in CSS order
+        let ordered_items = self.get_items_in_css_order(subgrid_id, tree)?;
+        placement_state.ordered_items = ordered_items;
+
+        // 3. Handle explicit placements
+        let explicit_placements =
+            self.process_explicit_placements(subgrid_id, &mut placement_state, tree)?;
+
+        // 4. Auto-place using placement cursor
+        let auto_placements = self.auto_place_items(subgrid_id, &mut placement_state, tree)?;
+
+        // 5. Dense packing pass (if enabled)
+        let dense_placements = self.dense_packing_pass(subgrid_id, &mut placement_state, tree)?;
+
+        // Combine all placements
+        let mut all_placements = explicit_placements;
+        all_placements.extend(auto_placements);
+        all_placements.extend(dense_placements);
+
+        self.auto_placement_states
+            .insert(subgrid_id, placement_state);
+
+        Ok(all_placements)
+    }
+
+    /// Coordinate bidirectional sizing (Pass 4)
+    pub fn coordinate_bidirectional_sizing(
+        &mut self,
+        tree: &BaseDocument,
+        subgrid_id: NodeId,
+        inputs: &taffy::tree::LayoutInput,
+    ) -> Result<(), GridPreprocessingError> {
+        // 1. Collect size contributions from subgrid items
+        let size_contributions = self.collect_subgrid_size_contributions(tree, subgrid_id, inputs)?;
+
+        // 2. Map contributions to parent grid tracks
+        let mapped_contributions =
+            self.map_contributions_to_parent_tracks(subgrid_id, size_contributions)?;
+
+        // 3. Update parent grid track sizing
+        let track_changes = self.update_parent_track_sizing(tree, subgrid_id, mapped_contributions)?;
+
+        // 4. Trigger parent grid re-layout if track sizes changed
+        if track_changes {
+            self.trigger_parent_recompute(subgrid_id)?;
+        }
+
+        Ok(())
+    }
+    
+    /// Execute bidirectional sizing loop with convergence
+    pub fn execute_bidirectional_sizing_loop(
+        &mut self,
+        tree: &BaseDocument,
+        subgrid_id: NodeId,
+        parent_context: &ParentGridContext,
+        inputs: &taffy::tree::LayoutInput,
+    ) -> Result<(), GridPreprocessingError> {
+        const MAX_PASSES: usize = 5;
+        const TOLERANCE: f32 = 0.1;
+        
+        let mut pass = 0;
+        let mut converged = false;
+        
+        // Initialize intrinsic sizing state if not present
+        if !self.intrinsic_sizing_states.contains_key(&subgrid_id) {
+            self.intrinsic_sizing_states.insert(subgrid_id, IntrinsicSizingState {
+                row_sizing: super::super::subgrid::layout_states::AxisSizingState {
+                    track_sizes: Vec::new(),
+                    sizing_constraints: Vec::new(),
+                    flexible_tracks: Vec::new(),
+                },
+                column_sizing: super::super::subgrid::layout_states::AxisSizingState {
+                    track_sizes: Vec::new(),
+                    sizing_constraints: Vec::new(),
+                    flexible_tracks: Vec::new(),
+                },
+                cross_axis_deps: Vec::new(),
+                coordination_pass: 0,
+                previous_row_sizes: None,
+                previous_column_sizes: None,
+            });
+        }
+        
+        while !converged && pass < MAX_PASSES {
+            // PASS A: Inherit parent tracks to subgrid
+            self.setup_track_inheritance(subgrid_id, parent_context, tree)?;
+            
+            // PASS B: Measure subgrid items
+            let _intrinsic_contributions = self.measure_content_intrinsic_sizes(tree, subgrid_id, inputs)?;
+            
+            // PASS C: Collect contributions to parent
+            let track_contributions = self.collect_subgrid_size_contributions(tree, subgrid_id, inputs)?;
+            
+            // Before Pass D (updating parent tracks), save current sizes for convergence check
+            if let Some(state) = self.intrinsic_sizing_states.get_mut(&subgrid_id) {
+                state.previous_row_sizes = Some(state.row_sizing.track_sizes.clone());
+                state.previous_column_sizes = Some(state.column_sizing.track_sizes.clone());
+                state.coordination_pass = pass;
+            }
+            
+            // PASS D: Update parent track sizing
+            let track_changes = self.update_parent_track_sizing(tree, subgrid_id, track_contributions)?;
+            
+            // PASS E: Check convergence
+            converged = !track_changes || self.check_size_convergence(subgrid_id, TOLERANCE)?;
+            
+            pass += 1;
+        }
+        
+        if !converged {
+            #[cfg(feature = "tracing")]
+            tracing::warn!("Subgrid bidirectional sizing did not converge after {} passes", MAX_PASSES);
+        }
+        
+        Ok(())
+    }
+    
+    /// Check if track sizes have converged
+    fn check_size_convergence(
+        &self,
+        subgrid_id: NodeId,
+        tolerance: f32,
+    ) -> Result<bool, GridPreprocessingError> {
+        let state = self.intrinsic_sizing_states.get(&subgrid_id)
+            .ok_or_else(|| GridPreprocessingError::preprocessing_failed(
+                "convergence_check",
+                subgrid_id.into(),
+                "Intrinsic sizing state not found"
+            ))?;
+        
+        // Check if we have previous sizes to compare
+        let row_converged = match &state.previous_row_sizes {
+            Some(prev) => Self::track_sizes_converged(prev, &state.row_sizing.track_sizes, tolerance),
+            None => false, // First pass, no previous data
+        };
+        
+        let column_converged = match &state.previous_column_sizes {
+            Some(prev) => Self::track_sizes_converged(prev, &state.column_sizing.track_sizes, tolerance),
+            None => false,
+        };
+        
+        Ok(row_converged && column_converged)
+    }
+    
+    /// Helper: Check if track sizes converged
+    fn track_sizes_converged(prev: &[f32], current: &[f32], tolerance: f32) -> bool {
+        if prev.len() != current.len() {
+            return false;
+        }
+        prev.iter()
+            .zip(current.iter())
+            .all(|(p, c)| (p - c).abs() < tolerance)
+    }
+
+    /// Virtual masonry placement algorithm
+    pub fn place_virtual_masonry_items(
+        &self,
+        _subgrid_id: NodeId,
+        masonry_state: &mut MasonryLayoutState,
+    ) -> Result<Vec<ItemPlacement>, GridPreprocessingError> {
+        let mut placements = Vec::new();
+
+        for virtual_item in &masonry_state.virtual_items {
+            // Find track with minimum running position
+            let selected_track = self.select_masonry_track(masonry_state, virtual_item)?;
+
+            // Create placement at selected track
+            let placement = ItemPlacement {
+                node_id: virtual_item.node_id,
+                grid_area: GridArea {
+                    row_start: masonry_state.track_running_positions[selected_track] as i32,
+                    row_end: (masonry_state.track_running_positions[selected_track]
+                        + virtual_item.item_size.1) as i32,
+                    column_start: selected_track as i32,
+                    column_end: (selected_track + 1) as i32,
+                },
+                placement_method: PlacementMethod::AutoPlacement,
+            };
+
+            placements.push(placement);
+
+            // Update running position for selected track
+            masonry_state.track_running_positions[selected_track] += virtual_item.item_size.1;
+        }
+
+        Ok(placements)
+    }
+
+    /// Bidirectional size contribution flow implementation
+    pub fn collect_subgrid_size_contributions(
+        &mut self,
+        tree: &BaseDocument,
+        subgrid_id: NodeId,
+        inputs: &taffy::tree::LayoutInput,
+    ) -> Result<Vec<TrackSizeContribution>, GridPreprocessingError> {
+        let mut contributions = Vec::new();
+        
+        // Step 1: Get intrinsic sizes from measurement
+        let intrinsic_contributions = self.measure_content_intrinsic_sizes(tree, subgrid_id, inputs)?;
+        
+        // Step 2: Get subgrid state for coordinate mapping
+        let _subgrid_state = self.subgrid_states.get(&subgrid_id)
+            .ok_or_else(|| GridPreprocessingError::preprocessing_failed(
+                "collect_contributions",
+                subgrid_id.into(),
+                "Subgrid state not found"
+            ))?;
+        
+        // Step 3: Map each item contribution to parent track coordinates
+        for intrinsic in intrinsic_contributions {
+            for track_index in intrinsic.affected_tracks {
+                // Map subgrid track index to parent track index
+                let parent_track_index = self.map_subgrid_track_to_parent(
+                    subgrid_id, 
+                    track_index, 
+                    intrinsic.axis
+                )?;
+                
+                contributions.push(TrackSizeContribution {
+                    parent_track_index,
+                    axis: intrinsic.axis,
+                    min_size: intrinsic.min_content_size,
+                    max_size: intrinsic.max_content_size,
+                    preferred_size: (intrinsic.min_content_size + intrinsic.max_content_size) / 2.0,
+                });
+            }
+        }
+        
+        // Step 4: Store in state for future passes
+        if let Some(state) = self.subgrid_states.get_mut(&subgrid_id) {
+            state.size_contributions = contributions.clone();
+        }
+        
+        Ok(contributions)
+    }
+    
+    /// Map subgrid track index to parent track index
+    fn map_subgrid_track_to_parent(
+        &self,
+        subgrid_id: NodeId,
+        track_index: usize,
+        axis: super::super::grid_context::GridAxis,
+    ) -> Result<usize, GridPreprocessingError> {
+        // Get subgrid state
+        let subgrid_state = self.subgrid_states.get(&subgrid_id)
+            .ok_or_else(|| GridPreprocessingError::preprocessing_failed(
+                "map_track_to_parent",
+                subgrid_id.into(),
+                "Subgrid state not found"
+            ))?;
+        
+        // Get the placement area to calculate offset
+        let placement = &subgrid_state.subgrid_placement;
+        
+        // Calculate offset based on axis (convert 1-based GridArea to 0-based offset)
+        let offset = match axis {
+            super::super::grid_context::GridAxis::Row => {
+                (placement.row_start - 1).max(0) as usize
+            }
+            super::super::grid_context::GridAxis::Column => {
+                (placement.column_start - 1).max(0) as usize
+            }
+        };
+        
+        // Validate track_index is within subgrid bounds
+        let track_count = match axis {
+            super::super::grid_context::GridAxis::Row => {
+                subgrid_state.inherited_tracks.row_tracks.len()
+            }
+            super::super::grid_context::GridAxis::Column => {
+                subgrid_state.inherited_tracks.column_tracks.len()
+            }
+        };
+        
+        if track_index >= track_count {
+            return Err(GridPreprocessingError::preprocessing_failed(
+                "map_track_to_parent",
+                subgrid_id.into(),
+                &format!(
+                    "Track index {} out of bounds for {} axis (max: {})",
+                    track_index,
+                    if matches!(axis, super::super::grid_context::GridAxis::Row) { "row" } else { "column" },
+                    track_count
+                )
+            ));
+        }
+        
+        // Apply coordinate transformation
+        // Use checked_add for safety (following pattern in subgrid/coordination.rs:apply_coordinate_transform)
+        let parent_track_index = track_index.checked_add(offset)
+            .ok_or_else(|| GridPreprocessingError::preprocessing_failed(
+                "map_track_to_parent",
+                subgrid_id.into(),
+                "Track index overflow in coordinate transformation"
+            ))?;
+        
+        Ok(parent_track_index)
+    }
+
+    /// Enhanced intrinsic sizing with content measurement
+    pub fn measure_content_intrinsic_sizes(
+        &self,
+        tree: &BaseDocument,
+        subgrid_id: NodeId,
+        inputs: &taffy::tree::LayoutInput,
+    ) -> Result<Vec<IntrinsicSizeContribution>, GridPreprocessingError> {
+        let mut contributions = Vec::new();
+        
+        // Get all items in the subgrid
+        let child_count = tree.child_count(subgrid_id);
+        
+        for i in 0..child_count {
+            let item_id = tree.get_child_id(subgrid_id, i);
+            
+            // USE EXISTING MEASUREMENT INFRASTRUCTURE
+            let min_content_size = calculate_item_intrinsic_size_for_masonry(
+                tree,
+                item_id,
+                &taffy::tree::LayoutInput {
+                    available_space: taffy::Size {
+                        width: taffy::AvailableSpace::MinContent,
+                        height: taffy::AvailableSpace::MinContent,
+                    },
+                    ..inputs.clone()
+                },
+                AbstractAxis::Block,
+            )?;
+            
+            let max_content_size = calculate_item_intrinsic_size_for_masonry(
+                tree,
+                item_id,
+                &taffy::tree::LayoutInput {
+                    available_space: taffy::Size {
+                        width: taffy::AvailableSpace::MaxContent,
+                        height: taffy::AvailableSpace::MaxContent,
+                    },
+                    ..inputs.clone()
+                },
+                AbstractAxis::Block,
+            )?;
+            
+            // Determine which tracks this item affects
+            let affected_tracks = self.determine_affected_tracks(item_id, tree)?;
+            
+            contributions.push(IntrinsicSizeContribution {
+                node_id: item_id,
+                min_content_size: min_content_size.width.max(min_content_size.height),
+                max_content_size: max_content_size.width.max(max_content_size.height),
+                affected_tracks,
+                axis: super::super::grid_context::GridAxis::Row,
+            });
+        }
+        
+        Ok(contributions)
+    }
+    
+    /// Determine which tracks an item affects
+    fn determine_affected_tracks(
+        &self,
+        item_id: NodeId,
+        tree: &BaseDocument,
+    ) -> Result<Vec<usize>, GridPreprocessingError> {
+        // In a full implementation, this would:
+        // 1. Get item's grid-row-start, grid-row-end (or grid-column for column axis)
+        // 2. Resolve GridLine positions to track indices
+        // 3. Return all tracks from start to end
+        
+        // For now, analyze span - if item has explicit placement, use it
+        // Otherwise assume it spans track 0
+        
+        // Get grid placement from style (would need access to Taffy style)
+        // This is a placeholder that handles the common case
+        let affected = vec![0]; // Start with track 0
+        
+        // When style access is available:
+        // let style = tree.get_style(item_id);
+        // match (style.grid_row.start, style.grid_row.end) {
+        //     (GridLine::Line(start), GridLine::Line(end)) => {
+        //         (start.max(0) as usize..end.max(0) as usize).collect()
+        //     }
+        //     (GridLine::Line(start), GridLine::Span(span)) => {
+        //         (start.max(0) as usize..(start + span as i16).max(0) as usize).collect()
+        //     }
+        //     _ => vec![0]  // Auto-placed items
+        // }
+        
+        Ok(affected)
+    }
+
+    /// Compute min-content size using actual measurement
+    #[allow(dead_code)]
+    fn compute_min_content_size(&self, node_id: NodeId) -> Result<f32, GridPreprocessingError> {
+        // Use CSS min-content calculation instead of hardcoded value
+        // This integrates with the intrinsic sizing state tracking system
+        if let Some(intrinsic_state) = self.intrinsic_sizing_states.get(&node_id) {
+            // Use minimum track size from row and column sizing
+            let row_min = intrinsic_state.row_sizing.track_sizes.iter()
+                .min_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+                .copied()
+                .unwrap_or(0.0);
+            let col_min = intrinsic_state.column_sizing.track_sizes.iter()
+                .min_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+                .copied()
+                .unwrap_or(0.0);
+            Ok(row_min.min(col_min))
+        } else {
+            // Fallback to CSS spec default for min-content when no content
+            Ok(0.0)
+        }
+    }
+
+    /// Compute max-content size using actual measurement  
+    #[allow(dead_code)]
+    fn compute_max_content_size(&self, node_id: NodeId) -> Result<f32, GridPreprocessingError> {
+        // Use CSS max-content calculation instead of hardcoded value
+        // This integrates with the intrinsic sizing state tracking system
+        if let Some(intrinsic_state) = self.intrinsic_sizing_states.get(&node_id) {
+            // Use maximum track size from row and column sizing
+            let row_max = intrinsic_state.row_sizing.track_sizes.iter()
+                .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+                .copied()
+                .unwrap_or(0.0);
+            let col_max = intrinsic_state.column_sizing.track_sizes.iter()
+                .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+                .copied()
+                .unwrap_or(0.0);
+            Ok(row_max.max(col_max))
+        } else {
+            // Fallback to CSS spec default for max-content when no content
+            Ok(0.0)
+        }
+    }
+
+    /// Select masonry track with minimum running position
+    pub fn select_masonry_track(
+        &self,
+        masonry_state: &MasonryLayoutState,
+        _virtual_item: &VirtualMasonryItem,
+    ) -> Result<usize, GridPreprocessingError> {
+        // Find track with minimum running position (with tolerance)
+        let mut min_position = f32::INFINITY;
+        let mut selected_track = 0;
+
+        for (track_index, &position) in masonry_state.track_running_positions.iter().enumerate() {
+            if position < min_position - masonry_state.item_tolerance {
+                min_position = position;
+                selected_track = track_index;
+            }
+        }
+
+        Ok(selected_track)
+    }
+}
