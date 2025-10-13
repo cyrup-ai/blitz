@@ -7,6 +7,7 @@ use taffy::prelude::NodeId;
 use taffy::RepetitionCount;
 
 use super::super::grid_errors::GridPreprocessingError;
+use super::track_counting::grid_axis_from_masonry;
 use super::virtual_placement::{GridItemInfo, create_virtual_placements_for_spanning_items};
 use crate::BaseDocument;
 
@@ -160,18 +161,19 @@ pub fn size_masonry_tracks_before_placement(
     })?;
 
     let style_wrapper = stylo_taffy::TaffyStyloStyle::from(&*computed_styles);
+    let grid_axis = grid_axis_from_masonry(masonry_axis);
     
-    // Get track template from grid axis (opposite of masonry axis)
-    let track_template = match masonry_axis {
-        AbstractAxis::Block => GridContainerStyle::grid_template_columns(&style_wrapper),
-        AbstractAxis::Inline => GridContainerStyle::grid_template_rows(&style_wrapper),
+    // Get track template from grid axis (Inline=Horizontal=Columns, Block=Vertical=Rows)
+    let track_template = match grid_axis {
+        AbstractAxis::Inline => GridContainerStyle::grid_template_columns(&style_wrapper),  // Inline=Horizontal → columns
+        AbstractAxis::Block => GridContainerStyle::grid_template_rows(&style_wrapper),      // Block=Vertical → rows
     };
 
     let Some(track_template) = track_template else {
         // No template defined, create even-sized tracks
-        let container_size = match masonry_axis {
-            AbstractAxis::Block => inputs.known_dimensions.width.unwrap_or(0.0),
-            AbstractAxis::Inline => inputs.known_dimensions.height.unwrap_or(0.0),
+        let container_size = match grid_axis {
+            AbstractAxis::Inline => inputs.known_dimensions.height.unwrap_or(0.0),  // Grid axis is rows → need height
+            AbstractAxis::Block => inputs.known_dimensions.width.unwrap_or(0.0),    // Grid axis is columns → need width
         };
         let track_size = container_size / track_count as f32;
         return Ok(vec![track_size; track_count]);
@@ -406,6 +408,8 @@ fn extract_track_sizes_from_taffy_layout(
     track_count: usize,
     masonry_axis: AbstractAxis,
 ) -> Result<Vec<f32>, GridPreprocessingError> {
+    let grid_axis = grid_axis_from_masonry(masonry_axis);
+    
     let container_layout = taffy_tree.layout(container_node).map_err(|_| {
         GridPreprocessingError::preprocessing_failed(
             "taffy_layout_extraction",
@@ -425,9 +429,9 @@ fn extract_track_sizes_from_taffy_layout(
 
     if children.is_empty() || track_count == 0 {
         // No children or no tracks - use even distribution fallback
-        let container_size = match masonry_axis {
-            AbstractAxis::Block => container_layout.size.width,
-            AbstractAxis::Inline => container_layout.size.height,
+        let container_size = match grid_axis {
+            AbstractAxis::Inline => container_layout.size.height,  // Grid axis is rows → need height
+            AbstractAxis::Block => container_layout.size.width,    // Grid axis is columns → need width
         };
         let track_size = if track_count > 0 {
             container_size / track_count as f32
@@ -451,20 +455,20 @@ fn extract_track_sizes_from_taffy_layout(
         })?;
 
         // Determine track index based on position
-        let (track_index, item_size) = match masonry_axis {
-            AbstractAxis::Block => {
-                // Masonry in block direction - tracks are columns (inline axis)
-                // Calculate which column this item is in based on its x position
-                let column_size = container_layout.size.width / track_count as f32;
-                let track_idx = (child_layout.location.x / column_size).floor() as usize;
-                (track_idx.min(track_count - 1), child_layout.size.width)
-            }
+        let (track_index, item_size) = match grid_axis {
             AbstractAxis::Inline => {
-                // Masonry in inline direction - tracks are rows (block axis)
+                // Grid axis is rows (horizontal tracks)
                 // Calculate which row this item is in based on its y position
                 let row_size = container_layout.size.height / track_count as f32;
                 let track_idx = (child_layout.location.y / row_size).floor() as usize;
                 (track_idx.min(track_count - 1), child_layout.size.height)
+            }
+            AbstractAxis::Block => {
+                // Grid axis is columns (vertical tracks)
+                // Calculate which column this item is in based on its x position
+                let column_size = container_layout.size.width / track_count as f32;
+                let track_idx = (child_layout.location.x / column_size).floor() as usize;
+                (track_idx.min(track_count - 1), child_layout.size.width)
             }
         };
 
@@ -473,9 +477,9 @@ fn extract_track_sizes_from_taffy_layout(
     }
 
     // Ensure all tracks have at least some minimum size if they're empty
-    let container_size = match masonry_axis {
-        AbstractAxis::Block => container_layout.size.width,
-        AbstractAxis::Inline => container_layout.size.height,
+    let container_size = match grid_axis {
+        AbstractAxis::Inline => container_layout.size.height,  // Grid axis is rows → need height
+        AbstractAxis::Block => container_layout.size.width,    // Grid axis is columns → need width
     };
 
     let min_track_size = container_size / track_count as f32;

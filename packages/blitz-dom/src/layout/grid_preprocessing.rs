@@ -194,13 +194,8 @@ pub fn apply_basedocument_grid_preprocessing(
     }
 
     if has_masonry_rows || has_masonry_columns {
-        let masonry_axis = if has_masonry_rows {
-            taffy::geometry::AbstractAxis::Block
-        } else {
-            taffy::geometry::AbstractAxis::Inline
-        };
-
-        return apply_masonry_layout(tree, node_id, inputs, masonry_axis);
+        // Masonry axis will be determined automatically from styles inside apply_masonry_layout
+        return apply_masonry_layout(tree, node_id, inputs);
     }
 
     // Step 3: Standard grid layout with extracted tracks

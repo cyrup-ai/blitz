@@ -19,6 +19,16 @@ pub struct TrackCountResult {
     pub auto_fit_range: Option<(usize, usize)>,
 }
 
+/// Compute grid axis from masonry axis
+/// Grid axis is PERPENDICULAR to masonry axis (with corrected Taffy mappings)
+#[inline]
+pub fn grid_axis_from_masonry(masonry_axis: AbstractAxis) -> AbstractAxis {
+    // Grid axis determines which template and size dimension to access:
+    // - Block masonry (vertical flow) needs Inline grid (columns template + width)
+    // - Inline masonry (horizontal flow) needs Block grid (rows template + height)
+    masonry_axis.other()
+}
+
 /// Detect if grid template contains auto-fill or auto-fit
 /// Returns the type of auto-repeat found, or None if no auto-repeat exists
 fn has_auto_repeat_tracks<'a, I>(tracks: I) -> Option<RepetitionCount>
@@ -57,11 +67,12 @@ pub fn calculate_auto_repeat_track_count(
     })?;
 
     let style_wrapper = stylo_taffy::TaffyStyloStyle::from(computed_styles);
+    let grid_axis = grid_axis_from_masonry(masonry_axis);
 
-    // Get grid axis tracks (opposite of masonry axis)
-    let tracks = match masonry_axis {
-        AbstractAxis::Block => style_wrapper.grid_template_columns(),
-        AbstractAxis::Inline => style_wrapper.grid_template_rows(),
+    // Get tracks from grid axis (Inline=Horizontal=Columns, Block=Vertical=Rows)
+    let tracks = match grid_axis {
+        AbstractAxis::Inline => style_wrapper.grid_template_columns(),  // Inline=Horizontal → columns
+        AbstractAxis::Block => style_wrapper.grid_template_rows(),      // Block=Vertical → rows
     };
 
     let Some(tracks) = tracks else {
@@ -130,14 +141,14 @@ pub fn calculate_auto_repeat_track_count(
         .map(|sizing_fn| estimate_track_size(*sizing_fn, container_size, tree, node_id, masonry_axis))
         .sum();
 
-    // Get gap size
-    let gap_size = match masonry_axis {
-        AbstractAxis::Block => {
-            // Masonry rows → columns have horizontal gap
+    // Get gap size for grid axis (Inline=Horizontal=Width, Block=Vertical=Height)
+    let gap_size = match grid_axis {
+        AbstractAxis::Inline => {
+            // Inline=Horizontal → use column gap (width)
             style_wrapper.gap().width.resolve_or_zero(Some(container_size), |_, _| 0.0)
         }
-        AbstractAxis::Inline => {
-            // Masonry columns → rows have vertical gap
+        AbstractAxis::Block => {
+            // Block=Vertical → use row gap (height)
             style_wrapper.gap().height.resolve_or_zero(Some(container_size), |_, _| 0.0)
         }
     };
@@ -376,11 +387,12 @@ pub fn get_definite_axis_track_count(
     })?;
 
     let style_wrapper = stylo_taffy::TaffyStyloStyle::from(computed_styles);
+    let grid_axis = grid_axis_from_masonry(masonry_axis);
 
-    // Get track template for grid axis
-    let tracks = match masonry_axis {
-        AbstractAxis::Block => style_wrapper.grid_template_columns(),
-        AbstractAxis::Inline => style_wrapper.grid_template_rows(),
+    // Get track template for grid axis (Inline=Horizontal=Columns, Block=Vertical=Rows)
+    let tracks = match grid_axis {
+        AbstractAxis::Inline => style_wrapper.grid_template_columns(),  // Inline=Horizontal → columns
+        AbstractAxis::Block => style_wrapper.grid_template_rows(),      // Block=Vertical → rows
     };
 
     let Some(tracks) = tracks else {
@@ -450,11 +462,12 @@ pub fn check_if_uses_auto_fit(
     })?;
 
     let style_wrapper = stylo_taffy::TaffyStyloStyle::from(computed_styles);
+    let grid_axis = grid_axis_from_masonry(masonry_axis);
 
-    // Get tracks for grid axis (opposite of masonry axis)
-    let tracks = match masonry_axis {
-        AbstractAxis::Block => style_wrapper.grid_template_columns(),
-        AbstractAxis::Inline => style_wrapper.grid_template_rows(),
+    // Get tracks for grid axis (Inline=Horizontal=Columns, Block=Vertical=Rows)
+    let tracks = match grid_axis {
+        AbstractAxis::Inline => style_wrapper.grid_template_columns(),  // Inline=Horizontal → columns
+        AbstractAxis::Block => style_wrapper.grid_template_rows(),      // Block=Vertical → rows
     };
 
     let Some(tracks) = tracks else {

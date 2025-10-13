@@ -9,6 +9,7 @@ use taffy::{
 
 use super::super::grid_errors::GridPreprocessingError;
 use super::super::intrinsic_sizing::calculate_item_intrinsic_size_for_masonry;
+use super::track_counting::grid_axis_from_masonry;
 use super::virtual_placement::GridItemInfo;
 use crate::BaseDocument;
 
@@ -16,6 +17,10 @@ use crate::BaseDocument;
 /// Provides complete configuration for CSS Grid Level 3 masonry layout
 #[derive(Debug, Clone)]
 pub struct MasonryConfig {
+    /// Direction items flow/cascade (masonry axis)
+    pub masonry_axis: AbstractAxis,
+    /// Direction tracks are counted (grid axis - perpendicular to masonry_axis)
+    pub grid_axis: AbstractAxis,
     pub track_count: usize,
     pub item_tolerance: f32,
     pub dense_packing: bool,
@@ -72,34 +77,38 @@ pub fn calculate_masonry_config(
     }
     
     // Determine masonry flow axis (direction items stack/cascade):
-    // - has_masonry_rows: items flow horizontally across row tracks → Inline axis
-    // - has_masonry_columns: items flow vertically down column tracks → Block axis
+    // - has_masonry_rows: rows are masonry → items flow DOWN (vertically) → Block axis
+    // - has_masonry_columns: columns are masonry → items flow ACROSS (horizontally) → Inline axis
     // Note: grid axis (where tracks are counted) is perpendicular to masonry axis
     let masonry_axis = if has_masonry_rows {
-        AbstractAxis::Inline  // Row masonry: items flow horizontally
+        AbstractAxis::Block   // Rows are masonry: items flow DOWN (vertical)
     } else {
-        AbstractAxis::Block   // Column masonry: items flow vertically
+        AbstractAxis::Inline  // Columns are masonry: items flow ACROSS (horizontal)
     };
+    
+    // Grid axis is perpendicular to masonry axis (use shared helper)
+    let grid_axis = grid_axis_from_masonry(masonry_axis);
 
-    // Extract available size for grid axis
+    // Extract available size for grid axis (Inline=Horizontal=Width, Block=Vertical=Height)
     // Try known_dimensions first, then fall back to available_space for definite values
-    let available_size = match masonry_axis {
-        AbstractAxis::Block => {
-            // Masonry rows → use column size (width)
+    let available_size = match grid_axis {
+        AbstractAxis::Inline => {
+            // Inline=Horizontal → need width for column spacing
             inputs.known_dimensions.width
                 .or_else(|| inputs.available_space.width.into_option())
         }
-        AbstractAxis::Inline => {
-            // Masonry columns → use row size (height)
+        AbstractAxis::Block => {
+            // Block=Vertical → need height for row spacing
             inputs.known_dimensions.height
                 .or_else(|| inputs.available_space.height.into_option())
         }
     };
 
     // Check if auto-repeat exists to get both count and auto-fit range
-    let tracks = match masonry_axis {
-        AbstractAxis::Block => style_wrapper.grid_template_columns(),
-        AbstractAxis::Inline => style_wrapper.grid_template_rows(),
+    // Get tracks from grid axis (Inline=Horizontal=Columns, Block=Vertical=Rows)
+    let tracks = match grid_axis {
+        AbstractAxis::Inline => style_wrapper.grid_template_columns(),  // Inline=Horizontal → columns
+        AbstractAxis::Block => style_wrapper.grid_template_rows(),      // Block=Vertical → rows
     };
     
     let (final_track_count, auto_fit_range) = if let Some(tracks) = tracks {
@@ -140,6 +149,8 @@ pub fn calculate_masonry_config(
     let dense_packing = extract_dense_packing_from_styles(tree, node_id)?;
 
     Ok(MasonryConfig {
+        masonry_axis,
+        grid_axis,
         track_count: final_track_count.max(1), // Ensure at least 1 track
         item_tolerance,
         dense_packing,
@@ -286,13 +297,14 @@ pub fn estimate_item_size_for_masonry(
     tree: &BaseDocument,
     item_id: NodeId,
     inputs: &taffy::tree::LayoutInput,
+    masonry_axis: AbstractAxis,
 ) -> Result<Size<f32>, GridPreprocessingError> {
     // Use proper intrinsic sizing instead of hardcoded fallbacks
     calculate_item_intrinsic_size_for_masonry(
         tree,
         item_id,
         inputs,
-        AbstractAxis::Block, // Masonry flow axis
+        masonry_axis, // Use actual masonry axis from config
     )
 }
 
@@ -309,23 +321,45 @@ pub fn place_item_in_taffy_sized_track(
 ) -> Result<(NodeId, stylo_taffy::GridArea), GridPreprocessingError> {
     use stylo_taffy::GridArea;
 
-    let item_size = estimate_item_size_for_masonry(tree, item.node_id, inputs)?;
-
-    // Apply track size constraints to ensure item fits within track bounds
-    let constrained_item_size =
-        apply_track_size_constraints(item_size, *track_size, masonry_axis, item);
+    // For masonry, items ALWAYS fill their track in the grid axis
+    // Only the masonry axis dimension varies based on content
+    let span = match masonry_axis {
+        AbstractAxis::Block => item.column_span,  // Vertical flow → spans columns
+        AbstractAxis::Inline => item.row_span,    // Horizontal flow → spans rows
+    };
+    let grid_axis_size = track_size * span as f32;
+    
+    // Get masonry axis size from intrinsic sizing
+    let item_size = estimate_item_size_for_masonry(tree, item.node_id, inputs, masonry_axis)?;
+    let masonry_axis_size = match masonry_axis {
+        AbstractAxis::Block => item_size.height,   // Vertical flow → height varies
+        AbstractAxis::Inline => item_size.width,   // Horizontal flow → width varies
+    };
+    
+    // Combine: grid axis always equals track, masonry axis from content
+    let constrained_item_size = match masonry_axis {
+        AbstractAxis::Block => Size {
+            width: grid_axis_size,      // Always fill track width
+            height: masonry_axis_size,  // Height from content
+        },
+        AbstractAxis::Inline => Size {
+            width: masonry_axis_size,   // Width from content
+            height: grid_axis_size,     // Always fill track height
+        },
+    };
 
     // Create placement information using Taffy-sized tracks
+    // Grid axis determines which span to use (perpendicular to masonry flow)
     let grid_area = match masonry_axis {
         AbstractAxis::Block => GridArea {
             grid_axis_start: track_index,
-            grid_axis_end: track_index + item.row_span, // ✨ Uses WARNING 10 field
+            grid_axis_end: track_index + item.column_span, // Vertical flow → spans across columns
             masonry_axis_position: masonry_state.get_track_position(track_index),
             masonry_axis_size: constrained_item_size.height, // Item size in masonry axis
         },
         AbstractAxis::Inline => GridArea {
             grid_axis_start: track_index,
-            grid_axis_end: track_index + item.column_span, // ✨ Uses WARNING 10 field
+            grid_axis_end: track_index + item.row_span, // Horizontal flow → spans across rows
             masonry_axis_position: masonry_state.get_track_position(track_index),
             masonry_axis_size: constrained_item_size.width, // Item size in masonry axis
         },

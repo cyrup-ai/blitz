@@ -27,42 +27,45 @@ pub fn calculate_item_intrinsic_size_for_masonry(
 ) -> Result<taffy::Size<f32>, GridPreprocessingError> {
     let node = tree.node_from_id(item_id.into());
 
-    // Phase 1: Check for explicit sizes first (CSS spec compliance)
-    if let Some(computed_styles) = node.primary_styles() {
+    // Phase 1: Get explicit sizes from CSS if available (CSS spec compliance)
+    let (explicit_width, explicit_height) = if let Some(computed_styles) = node.primary_styles() {
         let style_wrapper = stylo_taffy::TaffyStyloStyle::from(computed_styles);
+        get_explicit_size(&style_wrapper)
+    } else {
+        (None, None)
+    };
 
-        if let Some(explicit_size) = get_explicit_size(&style_wrapper) {
-            return Ok(explicit_size);
-        }
-    }
+    // Phase 2: Calculate content-based sizes for non-explicit dimensions
+    let content_size = if explicit_width.is_some() && explicit_height.is_some() {
+        // Both explicit - skip content calculation
+        taffy::Size::ZERO
+    } else {
+        calculate_content_intrinsic_size(tree, item_id, inputs)?
+    };
 
-    // Phase 2: Calculate content-based intrinsic size using existing infrastructure
-    let content_size = calculate_content_intrinsic_size(tree, item_id, inputs)?;
+    // Phase 3: Merge explicit and content-based sizes
+    let merged_size = taffy::Size {
+        width: explicit_width.unwrap_or(content_size.width),
+        height: explicit_height.unwrap_or(content_size.height),
+    };
 
-    // Phase 3: Apply min/max constraints per CSS specification
-    let constrained_size = apply_size_constraints(tree, item_id, content_size)?;
+    // Phase 4: Apply min/max constraints per CSS specification
+    let constrained_size = apply_size_constraints(tree, item_id, merged_size)?;
 
     Ok(constrained_size)
 }
 
 /// Extract explicit sizes from computed styles if available
+/// Returns partial sizes - dimensions may be None if not explicitly defined
 fn get_explicit_size<T: std::ops::Deref<Target = ComputedValues>>(
     style_wrapper: &stylo_taffy::TaffyStyloStyle<T>,
-) -> Option<taffy::Size<f32>> {
+) -> (Option<f32>, Option<f32>) {
     let size_style = style_wrapper.size();
 
     let width = size_style.width.into_option();
     let height = size_style.height.into_option();
 
-    // Only return if both dimensions are explicitly defined
-    if let (Some(w), Some(h)) = (width, height) {
-        Some(taffy::Size {
-            width: w,
-            height: h,
-        })
-    } else {
-        None
-    }
+    (width, height)
 }
 
 /// Calculate intrinsic size based on content type using existing measurement systems

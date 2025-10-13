@@ -24,19 +24,28 @@ mod virtual_placement;
 
 /// Apply CSS Grid Level 3 masonry layout algorithm
 /// Implements the two-phase algorithm: track sizing before item placement per CSS spec
+/// 
+/// Masonry axis is determined automatically from styles - no need to pass it in.
+/// Config extracts both masonry_axis (flow direction) and grid_axis (track direction).
 pub fn apply_masonry_layout(
     tree: &mut BaseDocument,
     node_id: NodeId,
     inputs: taffy::tree::LayoutInput,
-    masonry_axis: AbstractAxis,
 ) -> Result<taffy::tree::LayoutOutput, GridPreprocessingError> {
     use stylo_taffy::MasonryTrackState;
 
     // Phase 1: Get masonry configuration with auto-repeat support (MUST BE FIRST)
+    // Config now includes both masonry_axis and grid_axis
     let config = item_collection::calculate_masonry_config(tree, node_id, &inputs)?;
 
     // Phase 2: Size tracks using the track count from config
-    let track_sizes = track_sizing::size_masonry_tracks_before_placement(tree, node_id, &inputs, masonry_axis, config.track_count)?;
+    let track_sizes = track_sizing::size_masonry_tracks_before_placement(
+        tree, 
+        node_id, 
+        &inputs, 
+        config.masonry_axis,  // Use axis from config
+        config.track_count
+    )?;
 
     // Phase 3: Initialize masonry state with configuration ✨ WARNING 11
     let mut masonry_state =
@@ -49,31 +58,36 @@ pub fn apply_masonry_layout(
     let mut placed_items = Vec::new();
 
     for item in grid_items {
-        let item_span = match masonry_axis {
-            AbstractAxis::Block => item.row_span,
-            AbstractAxis::Inline => item.column_span,
+        // Grid axis determines which span to use (perpendicular to masonry flow)
+        let item_span = match config.masonry_axis {
+            AbstractAxis::Block => item.column_span,  // Vertical flow → spans across columns
+            AbstractAxis::Inline => item.row_span,    // Horizontal flow → spans across rows
         };
 
-        // Determine placement track: try gap first if dense packing enabled
-        let placement_track = if config.dense_packing {
-            // Calculate item size for gap fitting
+        // Determine placement track based on span and dense packing
+        let placement_track = if item_span > 1 {
+            // Spanning items ALWAYS need dense placement logic to find shortest span
+            // (not just when dense_packing is enabled)
+            masonry_state.find_dense_placement(item_span)
+                .unwrap_or_else(|| masonry_state.find_shortest_track_with_tolerance())
+        } else if config.dense_packing {
+            // Single-span item with dense packing: try gap first
             let item_size = item_collection::estimate_item_size_for_masonry(
                 tree,
                 item.node_id,
                 &inputs,
+                config.masonry_axis,
             )?;
-            let item_masonry_size = match masonry_axis {
+            let item_masonry_size = match config.masonry_axis {
                 AbstractAxis::Block => item_size.height,
                 AbstractAxis::Inline => item_size.width,
             };
 
-            // Calculate normal placement track size (for compatibility check)
             let shortest_track = masonry_state.find_shortest_track_with_tolerance();
             let normal_track_size: f32 = (shortest_track..(shortest_track + item_span))
                 .map(|i| track_sizes.get(i).copied().unwrap_or(0.0))
                 .sum();
 
-            // Detect compatible gaps
             let gaps = gap_detection::detect_compatible_gaps(
                 &masonry_state,
                 &track_sizes,
@@ -83,12 +97,11 @@ pub fn apply_masonry_layout(
                 config.item_tolerance,
             );
 
-            // Use first (earliest) gap if available, otherwise use shortest track
             gaps.first()
                 .map(|gap| gap.track_index)
                 .unwrap_or(shortest_track)
         } else {
-            // Standard shortest track placement (no dense packing)
+            // Single-span item without dense packing: use standard shortest track
             masonry_state.find_shortest_track_with_tolerance()
         };
 
@@ -99,10 +112,10 @@ pub fn apply_masonry_layout(
             placement_track,
             &track_sizes[placement_track], // Use actual Taffy track size
             &masonry_state,
-            masonry_axis,
+            config.masonry_axis,
             &inputs,
         )?;
-
+        
         // Record placement in masonry state
         let item_size_for_track = placement.1.masonry_axis_size;
 
@@ -121,32 +134,30 @@ pub fn apply_masonry_layout(
 
     // Phase 5.5: Collapse empty auto-fit tracks if needed
     let mut collapsed_track_sizes = track_sizes.clone();
-    eprintln!("[MASONRY] Track count: {}, auto_fit_range: {:?}", track_sizes.len(), config.auto_fit_range);
     if let Some((auto_fit_start, auto_fit_end)) = config.auto_fit_range {
-        eprintln!("[MASONRY] Collapsing auto-fit tracks [{}, {})", auto_fit_start, auto_fit_end);
         collapse_auto_fit_tracks_in_range(
             &mut placed_items,
             &mut collapsed_track_sizes,
             auto_fit_start,
             auto_fit_end,
         );
-        eprintln!("[MASONRY] After collapse: original track_sizes={:?}, collapsed={:?}", track_sizes, collapsed_track_sizes);
     }
 
     // Extract gap size for position calculations
     let node = tree.node_from_id(node_id.into());
     let gap_size = if let Some(styles) = node.primary_styles() {
         let style_wrapper = stylo_taffy::TaffyStyloStyle::from(styles);
-        match masonry_axis {
-            AbstractAxis::Block => {
-                // Masonry columns → use column gap (horizontal)
-                use taffy::ResolveOrZero;
+        use taffy::ResolveOrZero;
+        
+        // Gap is between tracks on the grid axis (Inline=Horizontal=Width, Block=Vertical=Height)
+        match config.grid_axis {
+            AbstractAxis::Inline => {
+                // Inline=Horizontal → use column gap (width)
                 let container_size = inputs.known_dimensions.width.unwrap_or(0.0);
                 style_wrapper.gap().width.resolve_or_zero(Some(container_size), |_, _| 0.0)
             }
-            AbstractAxis::Inline => {
-                // Masonry rows → use row gap (vertical)
-                use taffy::ResolveOrZero;
+            AbstractAxis::Block => {
+                // Block=Vertical → use row gap (height)
                 let container_size = inputs.known_dimensions.height.unwrap_or(0.0);
                 style_wrapper.gap().height.resolve_or_zero(Some(container_size), |_, _| 0.0)
             }
@@ -160,7 +171,7 @@ pub fn apply_masonry_layout(
         tree,
         &placed_items,
         inputs,
-        masonry_axis,
+        config.masonry_axis,
         &collapsed_track_sizes,
         gap_size,
     )?;
@@ -171,7 +182,7 @@ pub fn apply_masonry_layout(
         tree,
         &placed_items,
         &layout_outputs,  // ✅ Pass layout outputs for baseline extraction
-        masonry_axis,
+        config.masonry_axis,
         container_size,
     )?;
 
@@ -182,12 +193,12 @@ pub fn apply_masonry_layout(
         }
     }
 
-    // Phase 6: Apply final positions with adjustments
+    // Phase 6: Apply positions to items
     layout_output::apply_masonry_positions(
         tree,
         &placed_items,
         &layout_outputs,
-        masonry_axis,
+        config.masonry_axis,
         &collapsed_track_sizes,
         gap_size,
     );
@@ -195,7 +206,7 @@ pub fn apply_masonry_layout(
     // Phase 7: Generate container layout output
     Ok(layout_output::generate_container_output(
         &placed_items,
-        masonry_axis,
+        config.masonry_axis,
         inputs,
         &collapsed_track_sizes,
         gap_size,

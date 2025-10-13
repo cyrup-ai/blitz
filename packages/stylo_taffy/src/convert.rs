@@ -237,6 +237,7 @@ impl MasonryPlacementState {
     }
 
     /// Apply CSS Grid Level 3 tie-breaking rules for track selection
+    /// When multiple tracks have equal position within tolerance, prefer the earliest (leftmost/topmost)
     fn apply_tie_breaking_rules(&self, candidates: Vec<usize>) -> usize {
         if candidates.is_empty() {
             return 0;
@@ -246,35 +247,9 @@ impl MasonryPlacementState {
             return candidates[0];
         }
 
-        // Rule 1: Prefer tracks after most recently placed item
-        if let Some(last_track) = self.last_placed_track {
-            // Find candidates that come after the last placed track
-            let post_last_candidates: Vec<usize> = candidates
-                .iter()
-                .filter(|&&track| track >= last_track)
-                .copied()
-                .collect();
-
-            if !post_last_candidates.is_empty() {
-                // Among post-last candidates, prefer the earliest
-                return *post_last_candidates.iter().min().unwrap_or(&0);
-            }
-        }
-
-        // Rule 2: If no recent placement or no candidates after last,
-        // prefer earliest track that's >= placement cursor
-        let cursor_candidates: Vec<usize> = candidates
-            .iter()
-            .filter(|&&track| track >= self.placement_cursor)
-            .copied()
-            .collect();
-
-        if !cursor_candidates.is_empty() {
-            return *cursor_candidates.iter().min().unwrap_or(&0);
-        }
-
-        // Rule 3: Fallback to earliest available track
-        *candidates.iter().min().unwrap_or(&0)
+        // CSS Grid Level 3: When tracks have equal position, prefer earliest (lowest index)
+        // This creates the standard masonry left-to-right, top-to-bottom flow
+        candidates.into_iter().min().unwrap_or(0)
     }
 
     /// Enhanced item placement with CSS Grid Level 3 tracking
@@ -300,52 +275,36 @@ impl MasonryPlacementState {
         self.item_tolerance = tolerance.max(0.0); // Ensure non-negative
     }
 
-    /// CSS Grid Level 3 dense packing algorithm foundation
-    /// Finds optimal placement that minimizes gaps in the masonry layout
-    /// Returns the track index for dense placement, or None if no better placement exists
+    /// Find shortest span placement for spanning items
+    /// Returns the starting track index where the maximum position across the span is minimized
+    /// For CSS Grid Level 3 masonry, this ensures spanning items are placed in the shortest available span
     pub fn find_dense_placement(&self, item_span: usize) -> Option<usize> {
         if item_span == 0 || item_span > self.track_count {
             return None;
         }
 
-        let mut best_track = None;
+        let mut best_track = 0;
         let mut best_max_position = f32::INFINITY;
 
-        // Iterate through all possible track positions for the given span
+        // Find the span with the minimum maximum position
+        // When multiple spans tie, the for loop naturally prefers the earliest
         for track in 0..=(self.track_count.saturating_sub(item_span)) {
-            // Calculate the maximum position across all tracks in this span
             let span_end = track + item_span;
-            let span_positions = &self.track_positions[track..span_end];
-            let max_position = span_positions.iter().fold(0.0f32, |acc, &pos| acc.max(pos));
+            let max_position = self.track_positions[track..span_end]
+                .iter()
+                .fold(0.0f32, |acc, &pos| acc.max(pos));
 
-            // Dense packing prefers placements that minimize the maximum position
-            // This creates a more compact layout by filling gaps earlier
+            // Update best if this span is shorter
+            // On ties, earlier iteration wins (earliest track preference)
             if max_position < best_max_position {
                 best_max_position = max_position;
-                best_track = Some(track);
+                best_track = track;
             }
         }
 
-        // Only return a track if it would create a more compact layout
-        // compared to the standard tolerance-based placement
-        if let Some(track) = best_track {
-            // Check if this placement is meaningfully better than tolerance-based placement
-            let tolerance_track = self.find_shortest_track_with_tolerance();
-            let tolerance_position = if tolerance_track + item_span <= self.track_count {
-                let tolerance_span =
-                    &self.track_positions[tolerance_track..tolerance_track + item_span];
-                tolerance_span.iter().fold(0.0f32, |acc, &pos| acc.max(pos))
-            } else {
-                f32::INFINITY
-            };
-
-            // Return dense placement only if it's significantly better (more than tolerance)
-            if best_max_position + self.item_tolerance < tolerance_position {
-                return Some(track);
-            }
-        }
-
-        None
+        // Always return a result for valid spans
+        // Spanning items must find their shortest span placement
+        Some(best_track)
     }
 
     /// Place an item in the masonry grid, updating track positions

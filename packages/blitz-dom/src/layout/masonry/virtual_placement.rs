@@ -56,7 +56,7 @@ pub fn create_virtual_placements_for_spanning_items(
         if span > 1 {
             // Calculate item's intrinsic size contribution
             let item_size =
-                super::item_collection::estimate_item_size_for_masonry(tree, item.node_id, inputs)?;
+                super::item_collection::estimate_item_size_for_masonry(tree, item.node_id, inputs, masonry_axis)?;
             let base_intrinsic_size = match masonry_axis {
                 AbstractAxis::Block => item_size.height,
                 AbstractAxis::Inline => item_size.width,
@@ -149,7 +149,7 @@ pub fn calculate_track_intrinsic_size_with_spanning(
 
         if span == 1 {
             let item_size =
-                super::item_collection::estimate_item_size_for_masonry(tree, item.node_id, inputs)?;
+                super::item_collection::estimate_item_size_for_masonry(tree, item.node_id, inputs, masonry_axis)?;
             let contribution = match masonry_axis {
                 AbstractAxis::Block => item_size.height,
                 AbstractAxis::Inline => item_size.width,
