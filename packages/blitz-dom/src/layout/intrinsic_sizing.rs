@@ -35,12 +35,11 @@ pub fn calculate_item_intrinsic_size_for_masonry(
         (None, None)
     };
 
-    // Phase 2: Calculate content-based sizes for non-explicit dimensions
-    let content_size = if explicit_width.is_some() && explicit_height.is_some() {
-        // Both explicit - skip content calculation
-        taffy::Size::ZERO
-    } else {
+    // Phase 2: For dimensions without explicit sizes, calculate from content
+    let content_size = if explicit_width.is_none() || explicit_height.is_none() {
         calculate_content_intrinsic_size(tree, item_id, inputs)?
+    } else {
+        taffy::Size::ZERO  // Won't be used since both explicit
     };
 
     // Phase 3: Merge explicit and content-based sizes

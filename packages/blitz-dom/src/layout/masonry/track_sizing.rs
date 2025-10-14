@@ -16,9 +16,9 @@ use crate::BaseDocument;
 fn expand_track_template_to_count<'a, I>(
     tracks: I,
     target_count: usize,
-    tree: &BaseDocument,
-    node_id: NodeId,
-    masonry_axis: AbstractAxis,
+    _tree: &BaseDocument,
+    _node_id: NodeId,
+    _masonry_axis: AbstractAxis,
 ) -> Result<Vec<taffy::TrackSizingFunction>, GridPreprocessingError>
 where
     I: Iterator<Item = taffy::GenericGridTemplateComponent<String, &'a taffy::GridTemplateRepetition<String>>> + Clone,
@@ -136,7 +136,6 @@ pub fn size_masonry_tracks_before_placement(
     masonry_axis: AbstractAxis,
     track_count: usize,
 ) -> Result<Vec<f32>, GridPreprocessingError> {
-    use super::super::grid_context::{GridAxis, extract_tracks_from_stylo_computed_styles};
     use super::super::grid_errors::MasonryError;
     use taffy::GridContainerStyle;
 

@@ -98,35 +98,6 @@ pub fn create_taffy_available_space(
     }
 }
 
-/// Get track width using actual track sizes computed by Taffy
-/// Eliminates hardcoded values by using real track sizing results
-pub fn get_track_width_from_sizes(track_index: usize, track_sizes: &[f32]) -> f32 {
-    track_sizes.get(track_index).copied().unwrap_or_else(|| {
-        // Use CSS-compliant calculation instead of hardcoded fallback
-        // Calculate reasonable default based on available track sizes
-        if !track_sizes.is_empty() {
-            track_sizes.iter().sum::<f32>() / track_sizes.len() as f32
-        } else {
-            // Final fallback: use minimal valid track size
-            0.0
-        }
-    })
-}
-
-/// Get track height using actual track sizes computed by Taffy
-/// Eliminates hardcoded values by using real track sizing results
-pub fn get_track_height_from_sizes(track_index: usize, track_sizes: &[f32]) -> f32 {
-    track_sizes.get(track_index).copied().unwrap_or_else(|| {
-        // Use CSS-compliant calculation instead of hardcoded fallback
-        // Calculate reasonable default based on available track sizes
-        if !track_sizes.is_empty() {
-            track_sizes.iter().sum::<f32>() / track_sizes.len() as f32
-        } else {
-            // Final fallback: use minimal valid track size
-            0.0
-        }
-    })
-}
 
 /// Convert GridArea coordinates to Layout position and size
 pub fn grid_area_to_layout(

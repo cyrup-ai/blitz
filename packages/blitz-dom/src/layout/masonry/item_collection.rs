@@ -82,8 +82,11 @@ pub fn calculate_masonry_config(
     // Note: grid axis (where tracks are counted) is perpendicular to masonry axis
     let masonry_axis = if has_masonry_rows {
         AbstractAxis::Block   // Rows are masonry: items flow DOWN (vertical)
-    } else {
+    } else if has_masonry_columns {
         AbstractAxis::Inline  // Columns are masonry: items flow ACROSS (horizontal)
+    } else {
+        // Fallback: default to Block if neither is set
+        AbstractAxis::Block
     };
     
     // Grid axis is perpendicular to masonry axis (use shared helper)
@@ -368,46 +371,3 @@ pub fn place_item_in_taffy_sized_track(
     Ok((item.node_id, grid_area))
 }
 
-/// Apply track size constraints to item sizing
-/// Ensures items respect track boundaries in the definite axis while maintaining aspect ratios
-pub fn apply_track_size_constraints(
-    item_size: Size<f32>,
-    track_size: f32,
-    masonry_axis: AbstractAxis,
-    item: &GridItemInfo,
-) -> Size<f32> {
-    match masonry_axis {
-        AbstractAxis::Block => {
-            // Masonry flows vertically, constrain width to track size
-            let span = item.column_span as f32;
-            let max_width = track_size * span;
-
-            if item_size.width > max_width {
-                // Scale down proportionally to fit within track bounds
-                let scale_factor = max_width / item_size.width;
-                Size {
-                    width: max_width,
-                    height: item_size.height * scale_factor,
-                }
-            } else {
-                item_size
-            }
-        }
-        AbstractAxis::Inline => {
-            // Masonry flows horizontally, constrain height to track size
-            let span = item.row_span as f32;
-            let max_height = track_size * span;
-
-            if item_size.height > max_height {
-                // Scale down proportionally to fit within track bounds
-                let scale_factor = max_height / item_size.height;
-                Size {
-                    width: item_size.width * scale_factor,
-                    height: max_height,
-                }
-            } else {
-                item_size
-            }
-        }
-    }
-}
